@@ -35,7 +35,6 @@ The AWS identity needs permission for:
 ```text
 bedrock:ListFoundationModels
 bedrock:ListInferenceProfiles
-bedrock:GetInferenceProfile
 bedrock:InvokeModel
 bedrock:InvokeModelWithResponseStream
 ```

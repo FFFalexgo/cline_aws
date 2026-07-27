@@ -49,7 +49,7 @@ async function createController(doctor: BedrockStartupDoctor, modelId?: string) 
 }
 
 describe("BedrockStartupController", () => {
-	it("reaches ready only after discovery and the exact selected-target probe", async () => {
+	it("requires explicit confirmation before probing the selected target", async () => {
 		const probe = vi.fn(async () => ({ inputTokens: 3, outputTokens: 1 }))
 		const doctor = {
 			discover: vi.fn(async ({ onStage }: { onStage: (stage: string) => void }) => {
@@ -57,10 +57,12 @@ describe("BedrockStartupController", () => {
 				onStage("discoveringModels")
 				onStage("discoveringProfiles")
 				return {
+					connectionVerified: true,
 					targets: [target],
 					foundationModelCount: 0,
 					inferenceProfileCount: 1,
 					inferenceProfilePages: 1,
+					warnings: [],
 					maskedAccountId: "12••••••••12",
 				}
 			}),
@@ -70,10 +72,55 @@ describe("BedrockStartupController", () => {
 
 		await controller.start(true)
 
+		expect(controller.state.phase).toBe("awaitingSelection")
+		expect(controller.state.connectionVerified).toBe(true)
+		expect(probe).not.toHaveBeenCalled()
+
+		await controller.selectTarget(target.kind, target.invocationId)
+
 		expect(controller.state.phase).toBe("ready")
 		expect(probe).toHaveBeenCalledWith(expect.objectContaining({ target }))
 		expect(stateManager.values.actModeApiModelId).toBe(target.invocationId)
 		expect(controller.state.probe).toMatchObject({ status: "succeeded", usage: { inputTokens: 3, outputTokens: 1 } })
+	})
+
+	it("preserves both catalog failures instead of relabeling the first failure", async () => {
+		const warnings = [
+			{
+				stage: "discoveringModels",
+				category: "endpoint" as const,
+				service: "bedrock" as const,
+				operation: "ListFoundationModels",
+				httpStatus: 404,
+				message: "The configured AWS endpoint is invalid or unreachable.",
+			},
+			{
+				stage: "discoveringProfiles",
+				category: "endpoint" as const,
+				service: "bedrock" as const,
+				operation: "ListInferenceProfiles",
+				httpStatus: 404,
+				message: "The configured AWS endpoint is invalid or unreachable.",
+			},
+		]
+		const doctor = {
+			discover: vi.fn(async () => ({
+				connectionVerified: false,
+				targets: [],
+				foundationModelCount: 0,
+				inferenceProfileCount: 0,
+				inferenceProfilePages: 0,
+				warnings,
+			})),
+			probe: vi.fn(),
+		} as unknown as BedrockStartupDoctor
+		const { controller } = await createController(doctor)
+
+		await controller.start(true)
+
+		expect(controller.state.phase).toBe("failed")
+		expect(controller.state.catalogWarnings).toEqual(warnings)
+		expect(controller.state.error?.operation).toBe("ListFoundationModels")
 	})
 
 	it("cancels an in-flight startup check into an explicit cancelled state", async () => {
@@ -96,7 +143,8 @@ describe("BedrockStartupController", () => {
 		const { controller } = await createController(doctor)
 
 		const running = controller.start(true)
-		await vi.waitFor(() => expect(discover).toHaveBeenCalledOnce())
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(discover).toHaveBeenCalledOnce()
 		controller.cancel()
 		await running
 
@@ -125,6 +173,24 @@ describe("BedrockStartupController", () => {
 			service: "bedrock",
 			operation: "ListFoundationModels",
 			requestId: "request-456",
+		})
+	})
+
+	it("reports an invalid runtime endpoint as endpoint validation rather than STS", async () => {
+		const doctor = {
+			discover: async () => {
+				throw new Error("BEDROCK_ENDPOINT: The AWS endpoint must be a Bedrock Runtime endpoint.")
+			},
+			probe: vi.fn(),
+		} as unknown as BedrockStartupDoctor
+		const { controller } = await createController(doctor)
+
+		await controller.start(true)
+
+		expect(controller.state.error).toMatchObject({
+			category: "endpoint",
+			service: "bedrock-runtime",
+			operation: "ValidateEndpoint",
 		})
 	})
 })

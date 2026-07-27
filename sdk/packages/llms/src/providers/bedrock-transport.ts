@@ -79,9 +79,25 @@ export function validateBedrockConnection(
 
 	const endpoint = connection.endpoint?.trim();
 	const controlPlaneEndpoint = connection.controlPlaneEndpoint?.trim();
-	for (const [value, errorPrefix] of [
-		[endpoint, "BEDROCK_ENDPOINT"],
-		[controlPlaneEndpoint, "BEDROCK_CONTROL_PLANE_ENDPOINT"],
+	for (const [value, errorPrefix, serviceName, hostnamePatterns] of [
+		[
+			endpoint,
+			"BEDROCK_ENDPOINT",
+			"Bedrock Runtime",
+			[
+				/^bedrock-runtime(?:-fips)?\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?$/,
+				/^vpce-[a-z0-9-]+\.bedrock-runtime(?:-fips)?\.([a-z0-9-]+)\.vpce\.amazonaws\.com(?:\.cn)?$/,
+			],
+		],
+		[
+			controlPlaneEndpoint,
+			"BEDROCK_CONTROL_PLANE_ENDPOINT",
+			"Bedrock control plane",
+			[
+				/^bedrock(?:-fips)?\.([a-z0-9-]+)\.amazonaws\.com(?:\.cn)?$/,
+				/^vpce-[a-z0-9-]+\.bedrock(?:-fips)?\.([a-z0-9-]+)\.vpce\.amazonaws\.com(?:\.cn)?$/,
+			],
+		],
 	] as const) {
 		if (!value) continue;
 		let parsed: URL;
@@ -92,6 +108,34 @@ export function validateBedrockConnection(
 		}
 		if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
 			throw new Error(`${errorPrefix}: Enter a valid HTTPS endpoint.`);
+		}
+
+		const hostname = parsed.hostname.toLowerCase();
+		const awsHostname =
+			hostname.endsWith(".amazonaws.com") ||
+			hostname.endsWith(".amazonaws.com.cn");
+		const matchedRegion = hostnamePatterns
+			.map((pattern) => pattern.exec(hostname)?.[1])
+			.find(Boolean);
+		if (awsHostname && !matchedRegion) {
+			throw new Error(
+				`${errorPrefix}: The AWS endpoint must be a ${serviceName} endpoint, not another AWS service.`,
+			);
+		}
+		if (
+			(parsed.port && parsed.port !== "443") ||
+			(parsed.pathname && parsed.pathname !== "/") ||
+			parsed.search ||
+			parsed.hash
+		) {
+			throw new Error(
+				`${errorPrefix}: Enter an HTTPS origin without a path, query, fragment, or non-standard port.`,
+			);
+		}
+		if (matchedRegion && matchedRegion !== region) {
+			throw new Error(
+				`${errorPrefix}: The endpoint region must match BEDROCK_REGION (${region}).`,
+			);
 		}
 	}
 

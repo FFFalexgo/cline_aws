@@ -24,6 +24,52 @@ describe("Bedrock transport", () => {
 		).toThrow("BEDROCK_CONTROL_PLANE_ENDPOINT");
 	});
 
+	it("rejects Identity Center and service-mismatched AWS endpoints", () => {
+		expect(() =>
+			validateBedrockConnection({
+				region: "us-east-1",
+				endpoint:
+					"https://identitycenter.amazonaws.com/ssoins-1234567890abcdef",
+			}),
+		).toThrow("must be a Bedrock Runtime endpoint");
+		expect(() =>
+			validateBedrockConnection({
+				region: "us-east-1",
+				controlPlaneEndpoint:
+					"https://bedrock-runtime.us-east-1.amazonaws.com",
+			}),
+		).toThrow("must be a Bedrock control plane endpoint");
+	});
+
+	it("validates AWS endpoint regions and permits explicit non-AWS HTTPS origins", () => {
+		expect(() =>
+			validateBedrockConnection({
+				region: "us-east-1",
+				endpoint: "https://bedrock-runtime.us-west-2.amazonaws.com",
+			}),
+		).toThrow("endpoint region must match");
+		expect(
+			validateBedrockConnection({
+				region: "us-east-1",
+				endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com",
+				controlPlaneEndpoint:
+					"https://vpce-0123456789abcdef0.bedrock.us-east-1.vpce.amazonaws.com",
+			}),
+		).toMatchObject({
+			endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			controlPlaneEndpoint:
+				"https://vpce-0123456789abcdef0.bedrock.us-east-1.vpce.amazonaws.com",
+		});
+		expect(
+			validateBedrockConnection({
+				region: "us-east-1",
+				endpoint: "https://bedrock-runtime.corporate.example",
+			}),
+		).toMatchObject({
+			endpoint: "https://bedrock-runtime.corporate.example",
+		});
+	});
+
 	it("requires a workspace for relative CA paths", async () => {
 		await expect(
 			createBedrockTransport({

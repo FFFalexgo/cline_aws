@@ -74,6 +74,8 @@ export interface BedrockProbeResult {
 export interface BedrockStartupState {
 	phase: BedrockStartupPhase
 	progress: BedrockStartupProgress
+	connectionVerified: boolean
+	catalogWarnings: BedrockDoctorError[]
 	targets: BedrockTarget[]
 	selectedTarget?: BedrockTarget
 	probe: BedrockProbeResult

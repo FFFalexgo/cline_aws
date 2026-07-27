@@ -1,7 +1,6 @@
 import { stat } from "node:fs/promises"
 import { isAbsolute, join, resolve } from "node:path"
 import type { BedrockConnection } from "@bedrock-coder/llms"
-import { BEDROCK_DEFAULT_MODEL_ID } from "@shared/api"
 import {
 	type BedrockDoctorError,
 	type BedrockStartupPhase,
@@ -65,6 +64,8 @@ function initialState(connection: BedrockConnection): BedrockStartupState {
 		targets: [],
 		probe: { status: "not-run" },
 		probeFailures: {},
+		connectionVerified: false,
+		catalogWarnings: [],
 		connectionSummary: summary(connection),
 		updatedAt: now,
 	}
@@ -85,6 +86,20 @@ function errorContext(phase: BedrockStartupPhase): Pick<BedrockDoctorError, "sta
 		default:
 			return { stage: phase, service: "bedrock", operation: "Connect" }
 	}
+}
+
+function failureContext(error: unknown, phase: BedrockStartupPhase): Pick<BedrockDoctorError, "stage" | "service" | "operation"> {
+	const message = error instanceof Error ? error.message : String(error)
+	if (message.includes("BEDROCK_CONTROL_PLANE_ENDPOINT")) {
+		return { stage: "checkingBedrock", service: "bedrock", operation: "ValidateEndpoint" }
+	}
+	if (message.includes("BEDROCK_ENDPOINT")) {
+		return { stage: "checkingBedrock", service: "bedrock-runtime", operation: "ValidateEndpoint" }
+	}
+	if (message.includes("BEDROCK_REGION") || message.includes("BEDROCK_CA_BUNDLE")) {
+		return { stage: "checkingBedrock", service: "bedrock", operation: "ValidateConfiguration" }
+	}
+	return errorContext(phase)
 }
 
 export interface BedrockStartupControllerOptions {
@@ -174,6 +189,8 @@ export class BedrockStartupController {
 			selectedTarget: this.currentState.selectedTarget,
 			probe: this.currentState.probe,
 			error: this.currentState.error,
+			connectionVerified: this.currentState.connectionVerified,
+			catalogWarnings: this.currentState.catalogWarnings,
 			notice: this.currentState.notice,
 			targetCount: this.currentState.targets.length,
 			maskedAccountId: this.currentState.maskedAccountId,
@@ -226,6 +243,10 @@ export class BedrockStartupController {
 			notice: undefined,
 			probe: { status: "not-run" },
 			discoveryFromCache: false,
+			connectionVerified: false,
+			catalogWarnings: [],
+			targets: [],
+			selectedTarget: undefined,
 		})
 		const key = await this.cacheKey(connection, workspaceRoot)
 		const cachedDiscovery = forceRefresh ? undefined : BedrockStartupController.discoveryCache.get(key)
@@ -245,12 +266,15 @@ export class BedrockStartupController {
 				foundationModelCount: result.foundationModelCount,
 				inferenceProfileCount: result.inferenceProfileCount,
 				inferenceProfilePages: result.inferenceProfilePages,
+				connectionVerified: result.connectionVerified,
 				warnings: result.warnings,
 			}
 			BedrockStartupController.discoveryCache.set(key, discovery)
 			this.currentState = {
 				...this.currentState,
 				targets: result.targets,
+				connectionVerified: result.connectionVerified,
+				catalogWarnings: result.warnings,
 				maskedAccountId: result.maskedAccountId,
 				discoveryFromCache: Boolean(cachedDiscovery),
 				updatedAt: Date.now(),
@@ -261,27 +285,37 @@ export class BedrockStartupController {
 				inferenceProfiles: result.inferenceProfileCount,
 				inferenceProfilePages: result.inferenceProfilePages,
 				fromCache: Boolean(cachedDiscovery),
+				connectionVerified: result.connectionVerified,
 				warnings: result.warnings,
 			})
 
-			const savedId = this.options.stateManager.getGlobalSettingsKey("actModeApiModelId") || BEDROCK_DEFAULT_MODEL_ID
-			const savedTarget = result.targets.find((target) => target.invocationId === savedId || target.arn === savedId)
-			if (!savedTarget) {
-				const discoveryWarning = result.warnings?.join(" ")
-				this.transition("awaitingSelection", {
-					selectedTarget: undefined,
-					notice: [
-						discoveryWarning,
-						savedId
-							? `The saved destination "${savedId}" is no longer returned as an invocable streaming text target. Choose another destination.`
-							: "Choose a Bedrock destination to run the compatibility probe.",
-					]
-						.filter(Boolean)
-						.join(" "),
+			if (!result.connectionVerified) {
+				const primaryError = result.warnings[0] ?? {
+					stage: "checkingBedrock",
+					category: "unknown" as const,
+					service: "bedrock" as const,
+					operation: "ListFoundationModels/ListInferenceProfiles",
+					message: "The Bedrock catalog connection could not be validated.",
+					suggestion: "Inspect the individual catalog failures below, correct the endpoint or permissions, and retry.",
+				}
+				this.transition("failed", {
+					error: primaryError,
+					notice: "Neither Bedrock catalog operation succeeded. The failures are shown separately below.",
 				})
 				return
 			}
-			await this.runProbe(run, abortController, savedTarget)
+
+			const savedId = this.options.stateManager.getGlobalSettingsKey("actModeApiModelId")
+			const savedTarget = result.targets.find((target) => target.invocationId === savedId || target.arn === savedId)
+			this.transition("awaitingSelection", {
+				selectedTarget: savedTarget,
+				notice:
+					result.targets.length === 0
+						? "Connection established, but no compatible streaming text models or profiles were returned."
+						: savedTarget
+							? "Connection established. Review the saved destination, then confirm it to run the compatibility test."
+							: "Connection established. Choose a destination, then confirm it to run the compatibility test.",
+			})
 		} catch (error) {
 			await this.handleFailure(run, error)
 		}
@@ -358,7 +392,7 @@ export class BedrockStartupController {
 
 	private async handleFailure(run: number, error: unknown): Promise<void> {
 		if (!this.isCurrent(run)) return
-		const mapped = mapBedrockDoctorError(error, errorContext(this.currentState.phase))
+		const mapped = mapBedrockDoctorError(error, failureContext(error, this.currentState.phase))
 		this.transition(mapped.category === "cancelled" ? "cancelled" : "failed", {
 			error: mapped,
 		})

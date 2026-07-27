@@ -1,23 +1,23 @@
 import {
 	type FoundationModelSummary,
-	GetInferenceProfileCommand,
-	type GetInferenceProfileCommandOutput,
 	type InferenceProfileSummary,
 	ListFoundationModelsCommand,
 	ListInferenceProfilesCommand,
 } from "@aws-sdk/client-bedrock"
-import type { BedrockTarget } from "@shared/bedrock-startup"
+import type { BedrockDoctorError, BedrockTarget } from "@shared/bedrock-startup"
+import { mapBedrockDoctorError } from "./bedrock-errors"
 
 export interface BedrockControlPlaneClient {
 	send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<unknown>
 }
 
 export interface BedrockDiscoveryResult {
+	connectionVerified: boolean
 	targets: BedrockTarget[]
 	foundationModelCount: number
 	inferenceProfileCount: number
 	inferenceProfilePages: number
-	warnings?: string[]
+	warnings: BedrockDoctorError[]
 }
 
 function normalized(values: readonly string[] | undefined): string[] {
@@ -28,26 +28,33 @@ export function isCompatibleFoundationModel(summary: FoundationModelSummary): bo
 	const lifecycle = summary.modelLifecycle?.status
 	const input = normalized(summary.inputModalities)
 	const output = normalized(summary.outputModalities)
-	const inference = normalized(summary.inferenceTypesSupported)
 	return (
 		Boolean(summary.modelId) &&
 		(!lifecycle || lifecycle === "ACTIVE") &&
 		input.includes("TEXT") &&
 		output.includes("TEXT") &&
-		summary.responseStreamingSupported === true &&
-		inference.includes("ON_DEMAND")
+		summary.responseStreamingSupported === true
 	)
 }
 
+function supportsDirectInvocation(summary: FoundationModelSummary): boolean {
+	return normalized(summary.inferenceTypesSupported).includes("ON_DEMAND")
+}
+
 export function foundationTarget(summary: FoundationModelSummary): BedrockTarget | undefined {
-	if (!isCompatibleFoundationModel(summary) || !summary.modelId) return undefined
+	if (!isCompatibleFoundationModel(summary) || !supportsDirectInvocation(summary) || !summary.modelId) return undefined
+	return targetFromFoundationSummary(summary)
+}
+
+function targetFromFoundationSummary(summary: FoundationModelSummary): BedrockTarget {
+	const modelId = summary.modelId as string
 	return {
 		kind: "foundation-model",
-		invocationId: summary.modelId,
+		invocationId: modelId,
 		arn: summary.modelArn,
-		displayName: summary.modelName?.trim() || summary.modelId,
+		displayName: summary.modelName?.trim() || modelId,
 		providerName: summary.providerName,
-		baseModelId: summary.modelId,
+		baseModelId: modelId,
 		inputModalities: [...(summary.inputModalities ?? [])],
 		outputModalities: [...(summary.outputModalities ?? [])],
 		streaming: true,
@@ -68,6 +75,18 @@ function throwIfCancelled(error: unknown, signal: AbortSignal): void {
 	if (signal.aborted || (error instanceof Error && error.name === "AbortError")) throw error
 }
 
+function catalogError(
+	error: unknown,
+	stage: "discoveringModels" | "discoveringProfiles",
+	operation: "ListFoundationModels" | "ListInferenceProfiles",
+): BedrockDoctorError {
+	return mapBedrockDoctorError(error, {
+		stage,
+		service: "bedrock",
+		operation,
+	})
+}
+
 export class BedrockDiscoveryService {
 	constructor(private readonly client: BedrockControlPlaneClient) {}
 
@@ -75,10 +94,9 @@ export class BedrockDiscoveryService {
 		signal: AbortSignal,
 		onStage?: (stage: "discoveringModels" | "discoveringProfiles") => void,
 	): Promise<BedrockDiscoveryResult> {
-		const warnings = new Set<string>()
+		const warnings: BedrockDoctorError[] = []
 		onStage?.("discoveringModels")
 		let foundationCatalogAvailable = false
-		let foundationFailure: unknown
 		let foundationSummaries: FoundationModelSummary[] = []
 		try {
 			const foundationResponse = (await this.client.send(new ListFoundationModelsCommand({}), {
@@ -88,10 +106,11 @@ export class BedrockDiscoveryService {
 			foundationCatalogAvailable = true
 		} catch (error) {
 			throwIfCancelled(error, signal)
-			foundationFailure = error
-			warnings.add("Foundation-model discovery failed; showing inference profiles discovered independently.")
+			warnings.push(catalogError(error, "discoveringModels", "ListFoundationModels"))
 		}
-		const foundationTargets = foundationSummaries.flatMap((summary) => {
+
+		const compatibleFoundations = foundationSummaries.filter(isCompatibleFoundationModel)
+		const foundationTargets = compatibleFoundations.flatMap((summary) => {
 			const target = foundationTarget(summary)
 			return target ? [target] : []
 		})
@@ -101,7 +120,6 @@ export class BedrockDiscoveryService {
 		let nextToken: string | undefined
 		let inferenceProfilePages = 0
 		let profileCatalogAvailable = false
-		let profileFailure: unknown
 		try {
 			do {
 				const response = (await this.client.send(new ListInferenceProfilesCommand({ nextToken }), {
@@ -114,48 +132,17 @@ export class BedrockDiscoveryService {
 			} while (nextToken)
 		} catch (error) {
 			throwIfCancelled(error, signal)
-			profileFailure = error
-			warnings.add("Inference-profile discovery failed; showing foundation models discovered independently.")
+			warnings.push(catalogError(error, "discoveringProfiles", "ListInferenceProfiles"))
 		}
-
-		if (!foundationCatalogAvailable && !profileCatalogAvailable) {
-			throw foundationFailure ?? profileFailure ?? new Error("Bedrock model discovery failed.")
-		}
-
-		const hydratedProfiles = await Promise.all(
-			profileSummaries.map(async (profile): Promise<InferenceProfileSummary> => {
-				if ((profile.models?.length ?? 0) > 0 || !profile.inferenceProfileId) return profile
-				try {
-					const detail = (await this.client.send(
-						new GetInferenceProfileCommand({
-							inferenceProfileIdentifier: profile.inferenceProfileId,
-						}),
-						{ abortSignal: signal },
-					)) as GetInferenceProfileCommandOutput
-					return {
-						...profile,
-						models: detail.models,
-						inferenceProfileArn: detail.inferenceProfileArn ?? profile.inferenceProfileArn,
-						inferenceProfileId: detail.inferenceProfileId ?? profile.inferenceProfileId,
-						inferenceProfileName: detail.inferenceProfileName ?? profile.inferenceProfileName,
-						status: detail.status ?? profile.status,
-						type: detail.type ?? profile.type,
-					}
-				} catch (error) {
-					throwIfCancelled(error, signal)
-					warnings.add("Some inference-profile details could not be loaded.")
-					return profile
-				}
-			}),
-		)
 
 		const foundationByReference = new Map<string, BedrockTarget>()
-		for (const target of foundationTargets) {
+		for (const summary of compatibleFoundations) {
+			const target = targetFromFoundationSummary(summary)
 			foundationByReference.set(target.invocationId, target)
 			if (target.arn) foundationByReference.set(target.arn, target)
 		}
 		const profilesByReference = new Map<string, InferenceProfileSummary>()
-		for (const profile of hydratedProfiles) {
+		for (const profile of profileSummaries) {
 			if (profile.inferenceProfileId) profilesByReference.set(profile.inferenceProfileId, profile)
 			if (profile.inferenceProfileArn) profilesByReference.set(profile.inferenceProfileArn, profile)
 		}
@@ -196,25 +183,21 @@ export class BedrockDiscoveryService {
 			return undefined
 		}
 
-		const profileTargets = hydratedProfiles.flatMap((profile): BedrockTarget[] => {
+		const profileTargets = profileSummaries.flatMap((profile): BedrockTarget[] => {
 			if (profile.status !== "ACTIVE" || !profile.inferenceProfileId) return []
+			const base = resolveBase(profile)
+			if (foundationCatalogAvailable && !base) return []
 			const profileType =
 				profile.type ??
 				(profile.inferenceProfileArn?.includes(":application-inference-profile/") ? "APPLICATION" : "SYSTEM_DEFINED")
-			if (profileType !== "SYSTEM_DEFINED" && profileType !== "APPLICATION") return []
-			if (profileType === "APPLICATION" && !profile.inferenceProfileArn) return []
-			const base = resolveBase(profile)
-			const fallbackBaseModelId = foundationCatalogAvailable ? undefined : resolveBaseModelId(profile)
-			if (foundationCatalogAvailable && !base) return []
 			return [
 				{
 					kind: "inference-profile",
-					invocationId:
-						profileType === "APPLICATION" ? (profile.inferenceProfileArn as string) : profile.inferenceProfileId,
+					invocationId: profile.inferenceProfileId,
 					arn: profile.inferenceProfileArn,
 					displayName: profile.inferenceProfileName?.trim() || profile.inferenceProfileId,
 					providerName: base?.providerName,
-					baseModelId: base?.baseModelId ?? fallbackBaseModelId,
+					baseModelId: base?.baseModelId ?? resolveBaseModelId(profile),
 					profileType,
 					inputModalities: base?.inputModalities ?? ["TEXT"],
 					outputModalities: base?.outputModalities ?? ["TEXT"],
@@ -229,6 +212,7 @@ export class BedrockDiscoveryService {
 			deduplicated.set(targetKey(target), target)
 		}
 		return {
+			connectionVerified: foundationCatalogAvailable || profileCatalogAvailable,
 			targets: [...deduplicated.values()].sort((left, right) => {
 				if (left.kind !== right.kind) return left.kind === "foundation-model" ? -1 : 1
 				return left.displayName.localeCompare(right.displayName)
@@ -236,7 +220,7 @@ export class BedrockDiscoveryService {
 			foundationModelCount: foundationTargets.length,
 			inferenceProfileCount: profileTargets.length,
 			inferenceProfilePages,
-			warnings: [...warnings],
+			warnings,
 		}
 	}
 }

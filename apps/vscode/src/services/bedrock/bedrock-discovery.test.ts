@@ -1,4 +1,4 @@
-import { GetInferenceProfileCommand, ListFoundationModelsCommand, ListInferenceProfilesCommand } from "@aws-sdk/client-bedrock"
+import { ListFoundationModelsCommand, ListInferenceProfilesCommand } from "@aws-sdk/client-bedrock"
 import { describe, expect, it, vi } from "vitest"
 import { BedrockDiscoveryService } from "./bedrock-discovery"
 
@@ -106,35 +106,18 @@ describe("BedrockDiscoveryService", () => {
 					],
 				}
 			}
-			if (command instanceof GetInferenceProfileCommand) {
-				return {
-					inferenceProfileId: "application-direct",
-					inferenceProfileArn:
-						"arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/application-direct",
-					inferenceProfileName: "Application Direct",
-					status: "ACTIVE",
-					type: "APPLICATION",
-					models: [{ modelArn: "arn:aws:bedrock:us-east-1::foundation-model/text-model" }],
-				}
-			}
 			throw new Error("Unexpected command")
 		})
 
 		const result = await new BedrockDiscoveryService({ send }).discover(new AbortController().signal)
 
 		expect(result.inferenceProfilePages).toBe(2)
-		expect(result.targets.map((target) => target.displayName)).toEqual([
-			"Text Model",
-			"Application Direct",
-			"Application Text",
-			"US Text Model",
-		])
+		expect(result.targets.map((target) => target.displayName)).toEqual(["Text Model", "Application Text", "US Text Model"])
 		expect(result.targets.some((target) => target.displayName.includes("Image"))).toBe(false)
 		expect(result.targets.find((target) => target.displayName === "US Text Model")?.invocationId).toBe("us.text-model")
-		expect(result.targets.find((target) => target.displayName === "Application Text")?.invocationId).toBe(
-			"arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/application-text",
-		)
-		expect(send).toHaveBeenCalledTimes(4)
+		expect(result.targets.find((target) => target.displayName === "Application Text")?.invocationId).toBe("application-text")
+		expect(send).toHaveBeenCalledTimes(3)
+		expect(result.connectionVerified).toBe(true)
 	})
 
 	it("continues with inference profiles when foundation-model discovery fails", async () => {
@@ -177,7 +160,13 @@ describe("BedrockDiscoveryService", () => {
 			outputModalities: ["TEXT"],
 		})
 		expect(result.warnings).toEqual([
-			"Foundation-model discovery failed; showing inference profiles discovered independently.",
+			expect.objectContaining({
+				stage: "discoveringModels",
+				operation: "ListFoundationModels",
+				category: "endpoint",
+				httpStatus: 404,
+				requestId: "request-404",
+			}),
 		])
 	})
 
@@ -208,11 +197,14 @@ describe("BedrockDiscoveryService", () => {
 		expect(result.inferenceProfileCount).toBe(0)
 		expect(result.targets.map((target) => target.invocationId)).toEqual(["text-model"])
 		expect(result.warnings).toEqual([
-			"Inference-profile discovery failed; showing foundation models discovered independently.",
+			expect.objectContaining({
+				stage: "discoveringProfiles",
+				operation: "ListInferenceProfiles",
+			}),
 		])
 	})
 
-	it("keeps profile-only targets when optional profile-detail hydration fails", async () => {
+	it("keeps profile-only targets without requesting profile details", async () => {
 		const send = vi.fn(async (command: unknown) => {
 			if (command instanceof ListFoundationModelsCommand) throw new Error("foundation unavailable")
 			if (command instanceof ListInferenceProfilesCommand) {
@@ -227,7 +219,6 @@ describe("BedrockDiscoveryService", () => {
 					],
 				}
 			}
-			if (command instanceof GetInferenceProfileCommand) throw new Error("profile detail unavailable")
 			throw new Error("Unexpected command")
 		})
 
@@ -242,20 +233,71 @@ describe("BedrockDiscoveryService", () => {
 				outputModalities: ["TEXT"],
 			}),
 		])
-		expect(result.warnings).toEqual([
-			"Foundation-model discovery failed; showing inference profiles discovered independently.",
-			"Some inference-profile details could not be loaded.",
-		])
+		expect(result.warnings).toHaveLength(1)
+		expect(send).toHaveBeenCalledTimes(2)
 	})
 
-	it("fails only when both catalog operations are unavailable", async () => {
-		const foundationFailure = new Error("foundation unavailable")
+	it("reports both catalog failures with their correct operations", async () => {
 		const send = vi.fn(async (command: unknown) => {
-			if (command instanceof ListFoundationModelsCommand) throw foundationFailure
+			if (command instanceof ListFoundationModelsCommand) throw new Error("foundation unavailable")
 			if (command instanceof ListInferenceProfilesCommand) throw new Error("profiles unavailable")
 			throw new Error("Unexpected command")
 		})
 
-		await expect(new BedrockDiscoveryService({ send }).discover(new AbortController().signal)).rejects.toBe(foundationFailure)
+		const result = await new BedrockDiscoveryService({ send }).discover(new AbortController().signal)
+
+		expect(result.connectionVerified).toBe(false)
+		expect(result.targets).toEqual([])
+		expect(result.warnings.map((warning) => warning.operation)).toEqual(["ListFoundationModels", "ListInferenceProfiles"])
+	})
+
+	it("allows profiles backed by active streaming models that are not directly invocable", async () => {
+		const send = vi.fn(async (command: unknown) => {
+			if (command instanceof ListFoundationModelsCommand) {
+				return {
+					modelSummaries: [
+						{
+							modelId: "profile-only-model",
+							modelArn: "arn:aws:bedrock:us-east-1::foundation-model/profile-only-model",
+							modelName: "Profile-only Model",
+							inputModalities: ["TEXT"],
+							outputModalities: ["TEXT"],
+							responseStreamingSupported: true,
+							inferenceTypesSupported: ["INFERENCE_PROFILE"],
+							modelLifecycle: { status: "ACTIVE" },
+						},
+					],
+				}
+			}
+			if (command instanceof ListInferenceProfilesCommand) {
+				return {
+					inferenceProfileSummaries: [
+						{
+							inferenceProfileId: "us.profile-only-model",
+							inferenceProfileName: "US Profile-only Model",
+							status: "ACTIVE",
+							type: "SYSTEM_DEFINED",
+							models: [
+								{
+									modelArn: "arn:aws:bedrock:us-east-1::foundation-model/profile-only-model",
+								},
+							],
+						},
+					],
+				}
+			}
+			throw new Error("Unexpected command")
+		})
+
+		const result = await new BedrockDiscoveryService({ send }).discover(new AbortController().signal)
+
+		expect(result.foundationModelCount).toBe(0)
+		expect(result.targets).toEqual([
+			expect.objectContaining({
+				kind: "inference-profile",
+				invocationId: "us.profile-only-model",
+				baseModelId: "profile-only-model",
+			}),
+		])
 	})
 })

@@ -125,13 +125,18 @@ export function mapBedrockDoctorError(
 		.filter(Boolean)
 		.join(" ")
 	const description = rawDescription.toLowerCase()
-	const category = categoryFor(description, context.stage)
 	const metadata = chain.map((item) => asRecord(item.$metadata)).find(Boolean)
 	const awsCode = firstString(chain, ["code", "name"])
 	const requestId = firstString(chain, ["requestId"]) ?? (metadata ? readString(metadata, "requestId") : undefined)
 	const httpStatus =
 		chain.map((item) => readNumber(item, "statusCode")).find((value) => value !== undefined) ??
 		(metadata ? readNumber(metadata, "httpStatusCode") : undefined)
+	const category =
+		httpStatus === 404 &&
+		context.service === "bedrock" &&
+		(context.operation === "ListFoundationModels" || context.operation === "ListInferenceProfiles")
+			? "endpoint"
+			: categoryFor(description, context.stage)
 	const safeDetail = redactBedrockDiagnostics(rawDescription)
 	const includeAwsDetail = category === "model-validation" || category === "streaming"
 	const baseMessage =
