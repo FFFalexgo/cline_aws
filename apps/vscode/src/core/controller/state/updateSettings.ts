@@ -1,19 +1,11 @@
-import { setCompactionStrategyGlobally } from "@cline/core"
-import { Empty } from "@shared/proto/cline/common"
-import { PlanActMode, McpDisplayMode as ProtoMcpDisplayMode, UpdateSettingsRequest } from "@shared/proto/cline/state"
-import { convertProtoToApiProvider } from "@shared/proto-conversions/models/api-configuration-conversion"
+import { setCompactionStrategyGlobally } from "@bedrock-coder/core"
+import { Empty } from "@shared/proto/bedrock_coder/common"
+import { PlanActMode, McpDisplayMode as ProtoMcpDisplayMode, UpdateSettingsRequest } from "@shared/proto/bedrock_coder/state"
 import { OpenaiReasoningEffort } from "@shared/storage/types"
-import { TelemetrySetting } from "@shared/TelemetrySetting"
-import { ClineEnv } from "@/config"
-import { fetchRemoteConfig } from "@/core/storage/remote-config/fetch"
-import { clearRemoteConfig } from "@/core/storage/remote-config/utils"
 import { McpDisplayMode } from "@/shared/McpDisplayMode"
 import { Logger } from "@/shared/services/Logger"
-import { telemetryService } from "../../../services/telemetry"
 import { BrowserSettings as SharedBrowserSettings } from "../../../shared/BrowserSettings"
 import { Controller } from ".."
-import { accountLogoutClicked } from "../account/accountLogoutClicked"
-import { normalizeProviderSwitchModel } from "../models/providerSwitchNormalization"
 import { createTaskApiModelShim, resolveActiveModelIdFromApiConfiguration } from "../models/taskApiModel"
 
 /**
@@ -24,33 +16,20 @@ import { createTaskApiModelShim, resolveActiveModelIdFromApiConfiguration } from
  */
 export async function updateSettings(controller: Controller, request: UpdateSettingsRequest): Promise<Empty> {
 	try {
-		if (request.clineEnv !== undefined && request.clineEnv !== "") {
-			ClineEnv.setEnvironment(request.clineEnv)
-			await accountLogoutClicked(controller, Empty.create())
-		}
-
 		if (request.apiConfiguration) {
 			const protoApiConfiguration = request.apiConfiguration
 
 			const convertedApiConfigurationFromProto = {
 				...protoApiConfiguration,
-				// Convert proto ApiProvider enums to native string types
-				planModeApiProvider: protoApiConfiguration.planModeApiProvider
-					? convertProtoToApiProvider(protoApiConfiguration.planModeApiProvider)
-					: undefined,
-				actModeApiProvider: protoApiConfiguration.actModeApiProvider
-					? convertProtoToApiProvider(protoApiConfiguration.actModeApiProvider)
-					: undefined,
 				planModeReasoningEffort: protoApiConfiguration.planModeReasoningEffort as OpenaiReasoningEffort | undefined,
 				actModeReasoningEffort: protoApiConfiguration.actModeReasoningEffort as OpenaiReasoningEffort | undefined,
 			}
 
 			const previousApiConfiguration = controller.stateManager.getApiConfiguration()
-			const normalizedApiConfiguration = normalizeProviderSwitchModel(
-				controller.getProviderConfigStore(),
-				previousApiConfiguration,
-				convertedApiConfigurationFromProto,
-			)
+			const normalizedApiConfiguration = {
+				...previousApiConfiguration,
+				...convertedApiConfigurationFromProto,
+			}
 
 			controller.stateManager.setApiConfiguration(normalizedApiConfiguration)
 
@@ -59,12 +38,6 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 				const modelId = resolveActiveModelIdFromApiConfiguration(normalizedApiConfiguration, currentMode)
 				controller.task.api = createTaskApiModelShim(modelId)
 			}
-			controller.handleApiConfigurationChanged(previousApiConfiguration, normalizedApiConfiguration)
-		}
-
-		// Update telemetry setting
-		if (request.telemetrySetting) {
-			await controller.updateTelemetrySetting(request.telemetrySetting as TelemetrySetting)
 		}
 
 		// Update plan/act separate models setting
@@ -136,21 +109,9 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 		}
 
 		if (request.hooksEnabled !== undefined) {
-			const wasEnabled = controller.stateManager.getGlobalSettingsKey("hooksEnabled") ?? true
 			const isEnabled = !!request.hooksEnabled
 			controller.stateManager.setGlobalState("hooksEnabled", isEnabled)
-			if (controller.task && wasEnabled !== isEnabled) {
-				telemetryService.captureFeatureToggle(controller.task.ulid, "hooks", isEnabled, controller.task.api.getModel().id)
-			}
 		}
-		// Update yolo mode setting
-		if (request.yoloModeToggled !== undefined) {
-			if (controller.task) {
-				telemetryService.captureYoloModeToggle(controller.task.ulid, request.yoloModeToggled)
-			}
-			controller.stateManager.setGlobalState("yoloModeToggled", request.yoloModeToggled)
-		}
-
 		// Update worktrees setting
 		if (request.worktreesEnabled !== undefined) {
 			controller.stateManager.setGlobalState("worktreesEnabled", request.worktreesEnabled)
@@ -158,25 +119,12 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 
 		// Update subagents setting
 		if (request.subagentsEnabled !== undefined) {
-			const wasEnabled = controller.stateManager.getGlobalSettingsKey("subagentsEnabled") ?? false
 			const isEnabled = !!request.subagentsEnabled
 			controller.stateManager.setGlobalState("subagentsEnabled", isEnabled)
-
-			// Capture telemetry when setting changes
-			if (wasEnabled !== isEnabled) {
-				telemetryService.captureSubagentToggle(isEnabled)
-			}
 		}
 
 		// Update auto-condense setting
 		if (request.useAutoCondense !== undefined) {
-			if (controller.task) {
-				telemetryService.captureAutoCondenseToggle(
-					controller.task.ulid,
-					request.useAutoCondense,
-					controller.task.api.getModel().id,
-				)
-			}
 			controller.stateManager.setGlobalState("useAutoCondense", request.useAutoCondense)
 		}
 
@@ -246,31 +194,8 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 			controller.terminalManager?.setDefaultTerminalProfile(request.defaultTerminalProfile)
 		}
 
-		if (request.backgroundEditEnabled !== undefined) {
-			controller.stateManager.setGlobalState("backgroundEditEnabled", !!request.backgroundEditEnabled)
-		}
-
 		if (request.multiRootEnabled !== undefined) {
 			controller.stateManager.setGlobalState("multiRootEnabled", !!request.multiRootEnabled)
-		}
-
-		if (request.optOutOfRemoteConfig !== undefined) {
-			const hadOptedOut = controller.stateManager.getGlobalSettingsKey("optOutOfRemoteConfig")
-			const isOptingOut = !!request.optOutOfRemoteConfig
-			const isReenablingRemoteConfig = !isOptingOut && hadOptedOut
-
-			// Update now so any subsequent function can access the updated value
-			controller.stateManager.setGlobalState("optOutOfRemoteConfig", isOptingOut)
-
-			if (isOptingOut && !hadOptedOut) {
-				clearRemoteConfig()
-			} else if (isReenablingRemoteConfig) {
-				// Fire-and-forget: We don't need to await here
-				// The function catches any errors and posts the updated state to the webview
-				// The immediate state update below shows the user's intent (opted-in),
-				// and we apply the actual config afterwards without blocking the settings update
-				fetchRemoteConfig(controller)
-			}
 		}
 
 		if (request.showFeatureTips !== undefined) {

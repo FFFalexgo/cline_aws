@@ -1,6 +1,6 @@
 import { detectImageUrl } from "@integrations/misc/link-preview"
-import { StringRequest } from "@shared/proto/cline/common"
-import { IsImageUrl } from "@shared/proto/cline/web"
+import { StringRequest } from "@shared/proto/bedrock_coder/common"
+import { IsImageUrl } from "@shared/proto/bedrock_coder/web"
 import { Logger } from "@/shared/services/Logger"
 import { Controller } from "../index"
 
@@ -21,7 +21,7 @@ export async function checkIsImageUrl(_: Controller, request: StringRequest): Pr
 			url,
 		})
 	} catch (error) {
-		Logger.error(`Error checking if URL is an image: ${request.value}`, error)
+		Logger.error("Error checking local-only URL extension", error)
 		return IsImageUrl.create({
 			isImage: false,
 			url: request.value || "",

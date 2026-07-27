@@ -5,10 +5,9 @@ import type {
 	AgentTool,
 	BasicLogger,
 	HookErrorMode,
-	ITelemetryService,
 	ToolApprovalRequest,
 	ToolApprovalResult,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import { SessionRuntime } from "../../../runtime/orchestration/session-runtime-orchestrator";
 import {
 	buildSubAgentSystemPrompt,
@@ -21,10 +20,6 @@ export type DelegatedAgentConnectionConfig = Pick<
 	AgentConfig,
 	| "providerId"
 	| "modelId"
-	| "apiKey"
-	| "baseUrl"
-	| "headers"
-	| "onAuthError"
 	| "providerConfig"
 	| "knownModels"
 	| "thinking"
@@ -37,14 +32,13 @@ export type DelegatedAgentConnectionConfig = Pick<
 export interface DelegatedAgentRuntimeConfig
 	extends DelegatedAgentConnectionConfig {
 	cwd?: string;
-	providerId: string;
-	clinePlatform?: string;
-	clineIdeName?: string;
+	providerId: "bedrock";
+	bedrockCoderPlatform?: string;
+	bedrockCoderIdeName?: string;
 	maxIterations?: number;
 	hooks?: AgentHooks;
 	extensions?: AgentExtension[];
 	logger?: BasicLogger;
-	telemetry?: ITelemetryService;
 	workspaceMetadata?: string;
 }
 
@@ -86,10 +80,6 @@ export function createDelegatedAgentConfigProvider(
 		getConnectionConfig: () => ({
 			providerId: runtimeConfig.providerId,
 			modelId: runtimeConfig.modelId,
-			apiKey: runtimeConfig.apiKey,
-			baseUrl: runtimeConfig.baseUrl,
-			headers: runtimeConfig.headers,
-			onAuthError: runtimeConfig.onAuthError,
 			providerConfig: runtimeConfig.providerConfig,
 			knownModels: runtimeConfig.knownModels,
 			thinking: runtimeConfig.thinking,
@@ -111,10 +101,13 @@ export function buildDelegatedAgentConfig(
 	options: BuildDelegatedAgentConfigOptions,
 ): AgentConfig & { role?: string } {
 	const runtimeConfig = options.configProvider.getRuntimeConfig();
+	const delegatedRuntimeConfig = options.cwd
+		? { ...runtimeConfig, cwd: options.cwd }
+		: runtimeConfig;
 	const systemPrompt =
 		options.kind === "teammate"
-			? buildTeammateSystemPrompt(options.prompt, runtimeConfig)
-			: buildSubAgentSystemPrompt(options.prompt, runtimeConfig);
+			? buildTeammateSystemPrompt(options.prompt, delegatedRuntimeConfig)
+			: buildSubAgentSystemPrompt(options.prompt, delegatedRuntimeConfig);
 
 	return {
 		...options.configProvider.getConnectionConfig(),

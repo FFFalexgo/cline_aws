@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
 	AgentConfig,
-	AgentExtensionAutomationEventType,
 	AgentExtensionCommandResult,
 	AgentExtensionMcpServer,
 	AgentExtensionRule,
@@ -13,14 +12,14 @@ import type {
 	Message,
 	PluginSetupContext,
 	WorkspaceInfo,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import { SubprocessSandbox } from "../../runtime/tools/subprocess-sandbox";
 import type { PluginLoadDiagnostics } from "./plugin-load-report";
 import type { PluginTargeting } from "./plugin-targeting";
 
 export type SandboxedPluginSetupContext = Pick<
 	PluginSetupContext,
-	"session" | "client" | "user" | "workspaceInfo" | "logger"
+	"session" | "client" | "workspaceInfo" | "logger"
 >;
 
 export interface PluginSandboxOptions extends PluginTargeting {
@@ -28,7 +27,7 @@ export interface PluginSandboxOptions extends PluginTargeting {
 	exportName?: string;
 	/**
 	 * Max wall time for plugin module imports. Defaults to 4000 ms; falls back
-	 * to the `CLINE_PLUGIN_IMPORT_TIMEOUT_MS` env var when this option is not
+	 * to the `BEDROCK_CODER_PLUGIN_IMPORT_TIMEOUT_MS` env var when this option is not
 	 * set, allowing slower hosts (Windows cold-start, CI without warm caches)
 	 * to raise the ceiling without touching code.
 	 */
@@ -50,7 +49,6 @@ export interface PluginSandboxOptions extends PluginTargeting {
 	workspaceInfo?: WorkspaceInfo;
 	session?: SandboxedPluginSetupContext["session"];
 	client?: SandboxedPluginSetupContext["client"];
-	user?: SandboxedPluginSetupContext["user"];
 	/** Enables a logger bridge that forwards sandbox log calls to the host. */
 	logger?: SandboxedPluginSetupContext["logger"];
 }
@@ -59,7 +57,7 @@ type AgentExtension = NonNullable<AgentConfig["extensions"]>[number];
 type AgentExtensionApi = Parameters<NonNullable<AgentExtension["setup"]>>[0];
 type SandboxedAgentExtension = AgentExtension & {
 	/** Internal metadata used by settings surfaces that need source paths. */
-	__clinePluginPath?: string;
+	__bedrockCoderPluginPath?: string;
 };
 
 type SandboxedContributionDescriptor = {
@@ -79,11 +77,6 @@ type SandboxedRuleDescriptor = Omit<AgentExtensionRule, "id" | "content"> & {
 	hasContentHandler?: boolean;
 };
 
-type SandboxedAutomationEventTypeDescriptor =
-	AgentExtensionAutomationEventType & {
-		id: string;
-	};
-
 type SandboxedPluginDescriptor = {
 	pluginId: string;
 	pluginPath: string;
@@ -96,7 +89,6 @@ type SandboxedPluginDescriptor = {
 		rules: SandboxedRuleDescriptor[];
 		messageBuilders: SandboxedContributionDescriptor[];
 		providers: SandboxedContributionDescriptor[];
-		automationEventTypes: SandboxedAutomationEventTypeDescriptor[];
 		mcpServers: AgentExtensionMcpServer[];
 		shortcuts?: SandboxedContributionDescriptor[];
 		flags?: SandboxedContributionDescriptor[];
@@ -118,8 +110,6 @@ function normalizeDescriptor(
 			rules: descriptor.contributions?.rules ?? [],
 			messageBuilders: descriptor.contributions?.messageBuilders ?? [],
 			providers: descriptor.contributions?.providers ?? [],
-			automationEventTypes:
-				descriptor.contributions?.automationEventTypes ?? [],
 			mcpServers: descriptor.contributions?.mcpServers ?? [],
 			shortcuts: descriptor.contributions?.shortcuts ?? [],
 			flags: descriptor.contributions?.flags ?? [],
@@ -134,11 +124,11 @@ function isUnknownPluginIdError(error: unknown): boolean {
 
 function getPlatformPackageName(): string {
 	const platform = process.platform === "win32" ? "windows" : process.platform;
-	return `@cline/cli-${platform}-${process.arch}`;
+	return `@bedrock-coder/cli-${platform}-${process.arch}`;
 }
 
 function resolveBootstrapFromWrapper(): string | undefined {
-	const wrapperPath = process.env.CLINE_WRAPPER_PATH?.trim();
+	const wrapperPath = process.env.BEDROCK_CODER_WRAPPER_PATH?.trim();
 	if (!wrapperPath) {
 		return undefined;
 	}
@@ -262,7 +252,7 @@ export async function loadSandboxedPlugins(
 	const importTimeoutMs = withTimeoutFallback(
 		options.importTimeoutMs,
 		4000,
-		"CLINE_PLUGIN_IMPORT_TIMEOUT_MS",
+		"BEDROCK_CODER_PLUGIN_IMPORT_TIMEOUT_MS",
 	);
 	const hookTimeoutMs = withTimeoutFallback(options.hookTimeoutMs, 3000);
 	const contributionTimeoutMs = withTimeoutFallback(
@@ -277,7 +267,6 @@ export async function loadSandboxedPlugins(
 		cwd: options.cwd,
 		session: options.session,
 		client: options.client,
-		user: options.user,
 		workspaceInfo: options.workspaceInfo,
 		loggerEnabled: Boolean(options.logger),
 	};
@@ -313,7 +302,7 @@ export async function loadSandboxedPlugins(
 		(descriptor) => {
 			const extension: SandboxedAgentExtension = {
 				name: descriptor.name,
-				__clinePluginPath: descriptor.pluginPath,
+				__bedrockCoderPluginPath: descriptor.pluginPath,
 				manifest: descriptor.manifest,
 				setup: (api: AgentExtensionApi) => {
 					registerTools(
@@ -519,19 +508,6 @@ function registerSimpleContributions(
 			name: pd.name,
 			description: pd.description,
 			metadata: pd.metadata,
-		});
-	}
-
-	for (const eventType of descriptor.contributions?.automationEventTypes ??
-		[]) {
-		api.registerAutomationEventType({
-			eventType: eventType.eventType,
-			source: eventType.source,
-			description: eventType.description,
-			attributesSchema: eventType.attributesSchema,
-			payloadSchema: eventType.payloadSchema,
-			examples: eventType.examples,
-			metadata: eventType.metadata,
 		});
 	}
 

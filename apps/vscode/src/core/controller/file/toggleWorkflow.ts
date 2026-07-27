@@ -1,4 +1,4 @@
-import { ClineRulesToggles, RuleScope, ToggleWorkflowRequest } from "@shared/proto/cline/file"
+import { BedrockCoderRulesToggles, RuleScope, ToggleWorkflowRequest } from "@shared/proto/bedrock_coder/file"
 import { Logger } from "@/shared/services/Logger"
 import { Controller } from ".."
 
@@ -8,7 +8,7 @@ import { Controller } from ".."
  * @param request The request containing the workflow path and enabled state
  * @returns The updated workflow toggles
  */
-export async function toggleWorkflow(controller: Controller, request: ToggleWorkflowRequest): Promise<ClineRulesToggles> {
+export async function toggleWorkflow(controller: Controller, request: ToggleWorkflowRequest): Promise<BedrockCoderRulesToggles> {
 	const { workflowPath, enabled, scope } = request
 
 	if (!workflowPath || typeof enabled !== "boolean" || scope === undefined) {
@@ -20,7 +20,7 @@ export async function toggleWorkflow(controller: Controller, request: ToggleWork
 		throw new Error("Missing or invalid parameters for toggleWorkflow")
 	}
 
-	// Handle the three different scopes
+	// Handle local and global scopes.
 	let toggles: Record<string, boolean>
 
 	switch (scope) {
@@ -36,12 +36,6 @@ export async function toggleWorkflow(controller: Controller, request: ToggleWork
 			controller.stateManager.setWorkspaceState("workflowToggles", toggles)
 			break
 		}
-		case RuleScope.REMOTE: {
-			toggles = controller.stateManager.getGlobalStateKey("remoteWorkflowToggles")
-			toggles[workflowPath] = enabled
-			controller.stateManager.setGlobalState("remoteWorkflowToggles", toggles)
-			break
-		}
 		default:
 			throw new Error(`Invalid scope: ${scope}`)
 	}
@@ -49,5 +43,5 @@ export async function toggleWorkflow(controller: Controller, request: ToggleWork
 	await controller.postStateToWebview()
 
 	// Return the updated toggles
-	return ClineRulesToggles.create({ toggles: toggles })
+	return BedrockCoderRulesToggles.create({ toggles: toggles })
 }

@@ -4,42 +4,32 @@
 import assert from "node:assert"
 import * as vscode from "vscode"
 import { Logger } from "@/shared/services/Logger"
-import { sendAccountButtonClickedEvent } from "./core/controller/ui/subscribeToAccountButtonClicked"
 import { sendChatButtonClickedEvent } from "./core/controller/ui/subscribeToChatButtonClicked"
 import { sendHistoryButtonClickedEvent } from "./core/controller/ui/subscribeToHistoryButtonClicked"
-import { sendMarketplaceButtonClickedEvent } from "./core/controller/ui/subscribeToMarketplaceButtonClicked"
 import { sendMcpButtonClickedEvent } from "./core/controller/ui/subscribeToMcpButtonClicked"
 import { sendSettingsButtonClickedEvent } from "./core/controller/ui/subscribeToSettingsButtonClicked"
+import { sendTeamsButtonClickedEvent } from "./core/controller/ui/subscribeToTeamsButtonClicked"
 import { sendWorktreesButtonClickedEvent } from "./core/controller/ui/subscribeToWorktreesButtonClicked"
 import { WebviewProvider } from "./core/webview"
-import { createClineAPI } from "./exports"
+import { createBedrockCoderAPI } from "./exports"
 import "./utils/path" // necessary to have access to String.prototype.toPosix
 import path from "node:path"
-import type { ExtensionContext } from "vscode"
 import { HostProvider } from "@/hosts/host-provider"
 import { vscodeHostBridgeClient } from "@/hosts/vscode/hostbridge/client/host-grpc-client"
 import { createStorageContext } from "@/shared/storage/storage-context"
 import { readTextFromClipboard, writeTextToClipboard } from "@/utils/env"
 import { initialize, tearDown } from "./common"
-import { addToCline } from "./core/controller/commands/addToCline"
-import { explainWithCline } from "./core/controller/commands/explainWithCline"
-import { fixWithCline } from "./core/controller/commands/fixWithCline"
-import { improveWithCline } from "./core/controller/commands/improveWithCline"
+import { addToBedrockCoder } from "./core/controller/commands/addToBedrockCoder"
+import { explainWithBedrockCoder } from "./core/controller/commands/explainWithBedrockCoder"
+import { fixWithBedrockCoder } from "./core/controller/commands/fixWithBedrockCoder"
+import { improveWithBedrockCoder } from "./core/controller/commands/improveWithBedrockCoder"
 import { sendAddToInputEvent } from "./core/controller/ui/subscribeToAddToInput"
 import { sendShowWebviewEvent } from "./core/controller/ui/subscribeToShowWebview"
 import { HookDiscoveryCache } from "./core/hooks/HookDiscoveryCache"
-import {
-	cleanupMcpMarketplaceCatalogFromGlobalState,
-	cleanupOldApiKey,
-	migrateCustomInstructionsToGlobalRules,
-	migrateTaskHistoryToFile,
-	migrateWelcomeViewCompleted,
-	migrateWorkspaceToGlobalStorage,
-} from "./core/storage/state-migrations"
 import { workspaceResolver } from "./core/workspace"
-import { findMatchingNotebookCell, getContextForCommand, showWebview } from "./hosts/vscode/commandUtils"
+import { getContextForCommand, showWebview } from "./hosts/vscode/commandUtils"
 import { abortCommitGeneration, generateCommitMsg } from "./hosts/vscode/commit-message-generator"
-import { registerClineOutputChannel } from "./hosts/vscode/hostbridge/env/debugLog"
+import { registerBedrockCoderOutputChannel } from "./hosts/vscode/hostbridge/env/debugLog"
 import {
 	disposeVscodeCommentReviewController,
 	getVscodeCommentReviewController,
@@ -47,18 +37,13 @@ import {
 import { DIFF_VIEW_URI_SCHEME, diffContentProvider } from "./hosts/vscode/VscodeDiffContentProvider"
 import { EDIT_PREVIEW_URI_SCHEME, editPreviewContentProvider, VscodeEditPreview } from "./hosts/vscode/VscodeEditPreview"
 import { VscodeWebviewProvider } from "./hosts/vscode/VscodeWebviewProvider"
-import { exportVSCodeStorageToSharedFiles } from "./hosts/vscode/vscode-to-file-migration"
 import { ExtensionRegistryInfo } from "./registry"
-import { AuthService, LogoutReason } from "./sdk/auth-service"
-import { telemetryService } from "./services/telemetry"
-import type { RolloutBundleActivation } from "./services/telemetry/rollout-metadata"
-import { LG_TASK_URI_PATH, SharedUriHandler, TASK_URI_PATH } from "./services/uri/SharedUriHandler"
+import { LocalDiagnosticLogger } from "./services/diagnostics/local-diagnostic-logger"
+import { SharedUriHandler, TASK_URI_PATH } from "./services/uri/SharedUriHandler"
 import { ShowMessageType } from "./shared/proto/host/window"
 import { fileExistsAtPath } from "./utils/fs"
 
-export async function reportRolloutActivation(input: RolloutBundleActivation): Promise<void> {
-	await telemetryService.captureRolloutBundleActivated(input)
-}
+let localDiagnosticLogger: LocalDiagnosticLogger | undefined
 
 // This method is called when the VS Code extension is activated.
 // NOTE: This is VS Code specific - services that should be registered
@@ -69,17 +54,25 @@ export async function activate(context: vscode.ExtensionContext) {
 	// 1. Set up HostProvider for VSCode
 	// IMPORTANT: This must be done before any service can be registered
 	setupHostProvider(context)
+	localDiagnosticLogger = new LocalDiagnosticLogger(context.globalStorageUri.fsPath)
+	await localDiagnosticLogger.initialize()
+	localDiagnosticLogger.record({
+		name: "activation-started",
+		category: "extension",
+		details: {
+			version: ExtensionRegistryInfo.version,
+			platform: `${process.platform}-${process.arch}`,
+		},
+	})
 
 	// 2. Clean up legacy data patterns within VSCode's native storage.
 	// Moves workspace→global keys, task history→file, custom instructions→rules, etc.
 	// Must run BEFORE the file export so we copy clean state.
-	await cleanupLegacyVSCodeStorage(context)
 
 	// 3. One-time export of VSCode's native storage to shared file-backed stores.
-	// After this, all platforms (VSCode, CLI, JetBrains) read from ~/.cline/data/.
+	// After this, all platforms (VSCode, CLI, JetBrains) read from ~/.bedrock-coder/data/.
 	const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
 	const storageContext = createStorageContext({ workspacePath })
-	await exportVSCodeStorageToSharedFiles(context, storageContext)
 
 	// 4. Register services and perform common initialization
 	// IMPORTANT: Must be done after host provider is setup and migrations are complete
@@ -121,26 +114,61 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	)
 
-	// NOTE: Commands must be added to the internal registry before registering them with VSCode
+	// Commands must be added to the internal registry before registering them with VS Code.
 	const { commands } = ExtensionRegistryInfo
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand(commands.OpenDiagnosticLog, async () => {
+			if (!localDiagnosticLogger) return
+			await localDiagnosticLogger.flush()
+			await vscode.window.showTextDocument(vscode.Uri.file(localDiagnosticLogger.currentPath), {
+				preview: false,
+			})
+		}),
+		vscode.commands.registerCommand(commands.CopySanitizedDiagnostics, async () => {
+			if (!localDiagnosticLogger) return
+			const api = webview.controller.stateManager.getApiConfiguration()
+			const startup = webview.controller.bedrockStartup.state
+			const localContext = await webview.controller.getLocalDiagnosticContext()
+			const summary = await localDiagnosticLogger.sanitizedSummary({
+				extensionVersion: ExtensionRegistryInfo.version,
+				platform: `${process.platform}-${process.arch}`,
+				region: api.awsRegion,
+				endpoint: api.awsBedrockEndpoint,
+				profile: api.awsProfile,
+				targetId: startup.selectedTarget?.invocationId,
+				latestDoctorState: startup.phase,
+				...localContext,
+			})
+			await vscode.env.clipboard.writeText(summary)
+			void vscode.window.showInformationMessage("Sanitized Bedrock Coder diagnostics copied.")
+		}),
+		vscode.commands.registerCommand(commands.ClearLocalLogs, async () => {
+			if (!localDiagnosticLogger) return
+			const selection = await vscode.window.showWarningMessage(
+				"Clear current and previous local Bedrock Coder diagnostic logs?",
+				{ modal: true },
+				"Clear Logs",
+			)
+			if (selection !== "Clear Logs") return
+			await localDiagnosticLogger.clear()
+			void vscode.window.showInformationMessage("Local Bedrock Coder diagnostic logs cleared.")
+		}),
+	)
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand(commands.PlusButton, async () => {
 			const sidebarInstance = WebviewProvider.getInstance()
-			telemetryService.captureNewTaskClicked("activity_bar_plus", !!sidebarInstance.controller.task)
 			await sidebarInstance.controller.clearTask()
 			await sidebarInstance.controller.postStateToWebview()
 			await sendChatButtonClickedEvent()
 		}),
 	)
 	context.subscriptions.push(vscode.commands.registerCommand(commands.McpButton, () => sendMcpButtonClickedEvent()))
-	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.MarketplaceButton, () => sendMarketplaceButtonClickedEvent()),
-	)
 	context.subscriptions.push(vscode.commands.registerCommand(commands.SettingsButton, () => sendSettingsButtonClickedEvent()))
 	context.subscriptions.push(vscode.commands.registerCommand(commands.HistoryButton, () => sendHistoryButtonClickedEvent()))
-	context.subscriptions.push(vscode.commands.registerCommand(commands.AccountButton, () => sendAccountButtonClickedEvent()))
 	context.subscriptions.push(vscode.commands.registerCommand(commands.WorktreesButton, () => sendWorktreesButtonClickedEvent()))
+	context.subscriptions.push(vscode.commands.registerCommand(commands.TeamsButton, () => sendTeamsButtonClickedEvent()))
 
 	context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(DIFF_VIEW_URI_SCHEME, diffContentProvider))
 
@@ -154,22 +182,22 @@ export async function activate(context: vscode.ExtensionContext) {
 	const handleUri = async (uri: vscode.Uri) => {
 		const url = decodeURIComponent(uri.toString())
 		const uriPath = getUriPath(url)
-		const isTaskUri = uriPath === TASK_URI_PATH || uriPath === LG_TASK_URI_PATH
+		const isTaskUri = uriPath === TASK_URI_PATH
 
 		if (isTaskUri) {
-			await openClineSidebarForTaskUri()
+			await openBedrockCoderSidebarForTaskUri()
 		}
 
 		let success = await SharedUriHandler.handleUri(url)
 
 		// Task deeplinks can race with first-time sidebar initialization.
 		if (!success && isTaskUri) {
-			await openClineSidebarForTaskUri()
+			await openBedrockCoderSidebarForTaskUri()
 			success = await SharedUriHandler.handleUri(url)
 		}
 
 		if (!success) {
-			Logger.warn("Extension URI handler: Failed to process URI:", uri.toString())
+			Logger.warn(`Extension URI handler: Failed to process URI path: ${uriPath ?? "invalid"}`)
 		}
 	}
 	context.subscriptions.push(vscode.window.registerUriHandler({ handleUri }))
@@ -178,23 +206,23 @@ export async function activate(context: vscode.ExtensionContext) {
 	// registered handler above, which the harness can't synthesize. When running
 	// under browser-capture (debug harness) mode, expose the same handler on
 	// globalThis so the harness can deliver simulated OAuth callbacks via
-	// `ext.evaluate`. Gated on CLINE_CAPTURE_BROWSER so it never ships in prod.
-	if (process.env.CLINE_CAPTURE_BROWSER === "1" || process.env.CLINE_CAPTURE_BROWSER === "true") {
-		;(globalThis as Record<string, unknown>).__clineHandleUri = (url: string) => SharedUriHandler.handleUri(url)
+	// `ext.evaluate`. Gated on BEDROCK_CODER_CAPTURE_BROWSER so it never ships in prod.
+	if (process.env.BEDROCK_CODER_CAPTURE_BROWSER === "1" || process.env.BEDROCK_CODER_CAPTURE_BROWSER === "true") {
+		;(globalThis as Record<string, unknown>).__bedrockCoderHandleUri = (url: string) => SharedUriHandler.handleUri(url)
 	}
 
 	// Register size testing commands in development mode
 	if (IS_DEV) {
-		vscode.commands.executeCommand("setContext", "cline.isDevMode", IS_DEV)
+		vscode.commands.executeCommand("setContext", "bedrockCoder.isDevMode", IS_DEV)
 		// Use dynamic import to avoid loading the module in production
 		import("./dev/commands/tasks")
 			.then((module) => {
 				const devTaskCommands = module.registerTaskCommands(webview.controller)
 				context.subscriptions.push(...devTaskCommands)
-				Logger.log("[Cline Dev] Dev mode activated & dev commands registered")
+				Logger.log("[Bedrock Coder Dev] Dev mode activated & dev commands registered")
 			})
 			.catch((error) => {
-				Logger.log(`[Cline Dev] Failed to register dev commands: ${error}`)
+				Logger.log(`[BedrockCoder Dev] Failed to register dev commands: ${error}`)
 			})
 	}
 
@@ -287,40 +315,46 @@ export async function activate(context: vscode.ExtensionContext) {
 						)
 					}
 
-					// Add to Cline (Always available)
-					const addAction = new vscode.CodeAction("Add to Cline", vscode.CodeActionKind.QuickFix)
+					// Add to BedrockCoder (Always available)
+					const addAction = new vscode.CodeAction("Add to Bedrock Coder", vscode.CodeActionKind.QuickFix)
 					addAction.command = {
 						command: commands.AddToChat,
-						title: "Add to Cline",
+						title: "Add to Bedrock Coder",
 						arguments: [expandedRange, context.diagnostics],
 					}
 					actions.push(addAction)
 
-					// Explain with Cline (Always available)
-					const explainAction = new vscode.CodeAction("Explain with Cline", vscode.CodeActionKind.RefactorExtract) // Using a refactor kind
+					// Explain with BedrockCoder (Always available)
+					const explainAction = new vscode.CodeAction(
+						"Explain with Bedrock Coder",
+						vscode.CodeActionKind.RefactorExtract,
+					) // Using a refactor kind
 					explainAction.command = {
 						command: commands.ExplainCode,
-						title: "Explain with Cline",
+						title: "Explain with Bedrock Coder",
 						arguments: [expandedRange],
 					}
 					actions.push(explainAction)
 
-					// Improve with Cline (Always available)
-					const improveAction = new vscode.CodeAction("Improve with Cline", vscode.CodeActionKind.RefactorRewrite) // Using a refactor kind
+					// Improve with BedrockCoder (Always available)
+					const improveAction = new vscode.CodeAction(
+						"Improve with Bedrock Coder",
+						vscode.CodeActionKind.RefactorRewrite,
+					) // Using a refactor kind
 					improveAction.command = {
 						command: commands.ImproveCode,
-						title: "Improve with Cline",
+						title: "Improve with Bedrock Coder",
 						arguments: [expandedRange],
 					}
 					actions.push(improveAction)
 
-					// Fix with Cline (Only if diagnostics exist)
+					// Fix with BedrockCoder (Only if diagnostics exist)
 					if (context.diagnostics.length > 0) {
-						const fixAction = new vscode.CodeAction("Fix with Cline", vscode.CodeActionKind.QuickFix)
+						const fixAction = new vscode.CodeAction("Fix with Bedrock Coder", vscode.CodeActionKind.QuickFix)
 						fixAction.isPreferred = true
 						fixAction.command = {
-							command: commands.FixWithCline,
-							title: "Fix with Cline",
+							command: commands.FixWithBedrockCoder,
+							title: "Fix with Bedrock Coder",
 							arguments: [expandedRange, context.diagnostics],
 						}
 						actions.push(fixAction)
@@ -345,17 +379,20 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (!context) {
 				return
 			}
-			await addToCline(context.controller, context.commandContext)
+			await addToBedrockCoder(context.controller, context.commandContext)
 		}),
 	)
 	context.subscriptions.push(
-		vscode.commands.registerCommand(commands.FixWithCline, async (range: vscode.Range, diagnostics: vscode.Diagnostic[]) => {
-			const context = await getContextForCommand(range, diagnostics)
-			if (!context) {
-				return
-			}
-			await fixWithCline(context.controller, context.commandContext)
-		}),
+		vscode.commands.registerCommand(
+			commands.FixWithBedrockCoder,
+			async (range: vscode.Range, diagnostics: vscode.Diagnostic[]) => {
+				const context = await getContextForCommand(range, diagnostics)
+				if (!context) {
+					return
+				}
+				await fixWithBedrockCoder(context.controller, context.commandContext)
+			},
+		),
 	)
 	context.subscriptions.push(
 		vscode.commands.registerCommand(commands.ExplainCode, async (range: vscode.Range) => {
@@ -363,7 +400,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (!context) {
 				return
 			}
-			await explainWithCline(context.controller, context.commandContext)
+			await explainWithBedrockCoder(context.controller, context.commandContext)
 		}),
 	)
 	context.subscriptions.push(
@@ -372,7 +409,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (!context) {
 				return
 			}
-			await improveWithCline(context.controller, context.commandContext)
+			await improveWithBedrockCoder(context.controller, context.commandContext)
 		}),
 	)
 
@@ -394,116 +431,16 @@ export async function activate(context: vscode.ExtensionContext) {
 
 			// Send show webview event with preserveEditorFocus flag
 			sendShowWebviewEvent(preserveEditorFocus)
-			telemetryService.captureButtonClick("command_focusChatInput", webview.controller?.task?.ulid)
 		}),
-	)
-
-	// Register Jupyter Notebook command handlers
-	const NOTEBOOK_EDIT_INSTRUCTIONS = `Special considerations for using replace_in_file on *.ipynb files:
-* Jupyter notebook files are JSON format with specific structure for source code cells
-* Source code in cells is stored as JSON string arrays ending with explicit \\n characters and commas
-* Always match the exact JSON format including quotes, commas, and escaped newlines.`
-
-	// Helper to get notebook context for Jupyter commands
-	async function getNotebookCommandContext(range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) {
-		const activeNotebook = vscode.window.activeNotebookEditor
-		if (!activeNotebook) {
-			HostProvider.window.showMessage({
-				type: ShowMessageType.ERROR,
-				message: "No active Jupyter notebook found. Please open a .ipynb file first.",
-			})
-			return null
-		}
-
-		const ctx = await getContextForCommand(range, diagnostics)
-		if (!ctx) {
-			return null
-		}
-
-		const filePath = ctx.commandContext.filePath || ""
-		let cellJson: string | null = null
-		if (activeNotebook.notebook.cellCount > 0) {
-			const cellIndex = activeNotebook.notebook.cellAt(activeNotebook.selection.start).index
-			cellJson = await findMatchingNotebookCell(filePath, cellIndex)
-		}
-
-		return { ...ctx, cellJson }
-	}
-
-	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			commands.JupyterGenerateCell,
-			async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
-				const userPrompt = await showJupyterPromptInput(
-					"Generate Notebook Cell",
-					"Enter your prompt for generating notebook cell (press Enter to confirm & Esc to cancel)",
-				)
-				if (!userPrompt) return
-
-				const ctx = await getNotebookCommandContext(range, diagnostics)
-				if (!ctx) return
-
-				const notebookContext = `User prompt: ${userPrompt}
-Insert a new Jupyter notebook cell above or below the current cell based on user prompt.
-${NOTEBOOK_EDIT_INSTRUCTIONS}
-
-Current Notebook Cell Context (JSON, sanitized of image data):
-\`\`\`json
-${ctx.cellJson || "{}"}
-\`\`\``
-
-				await addToCline(ctx.controller, ctx.commandContext, notebookContext)
-			},
-		),
-	)
-
-	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			commands.JupyterExplainCell,
-			async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
-				const ctx = await getNotebookCommandContext(range, diagnostics)
-				if (!ctx) return
-
-				const notebookContext = ctx.cellJson
-					? `\n\nCurrent Notebook Cell Context (JSON, sanitized of image data):\n\`\`\`json\n${ctx.cellJson}\n\`\`\``
-					: undefined
-
-				await explainWithCline(ctx.controller, ctx.commandContext, notebookContext)
-			},
-		),
-	)
-
-	context.subscriptions.push(
-		vscode.commands.registerCommand(
-			commands.JupyterImproveCell,
-			async (range?: vscode.Range, diagnostics?: vscode.Diagnostic[]) => {
-				const userPrompt = await showJupyterPromptInput(
-					"Improve Notebook Cell",
-					"Enter your prompt for improving the current notebook cell (press Enter to confirm & Esc to cancel)",
-				)
-				if (!userPrompt) return
-
-				const ctx = await getNotebookCommandContext(range, diagnostics)
-				if (!ctx) return
-
-				const notebookContext = `User prompt: ${userPrompt}
-${NOTEBOOK_EDIT_INSTRUCTIONS}
-
-Current Notebook Cell Context (JSON, sanitized of image data):
-\`\`\`json
-${ctx.cellJson || "{}"}
-\`\`\``
-
-				await improveWithCline(ctx.controller, ctx.commandContext, notebookContext)
-			},
-		),
 	)
 
 	// Register the openWalkthrough command handler
 	context.subscriptions.push(
 		vscode.commands.registerCommand(commands.Walkthrough, async () => {
-			await vscode.commands.executeCommand("workbench.action.openWalkthrough", `${context.extension.id}#ClineWalkthrough`)
-			telemetryService.captureButtonClick("command_openWalkthrough")
+			await vscode.commands.executeCommand(
+				"workbench.action.openWalkthrough",
+				`${context.extension.id}#BedrockCoderWalkthrough`,
+			)
 		}),
 	)
 
@@ -517,82 +454,19 @@ ${ctx.cellJson || "{}"}
 		}),
 	)
 
-	// Listen for secrets changes (cross-window login/logout sync).
-	// NOTE: Credentials now live in providers.json (single source of truth).
-	// This listener catches legacy secrets.json writes from older windows and
-	// triggers a re-read from providers.json via restoreRefreshTokenAndRetrieveAuthInfo().
-	const unsubSecrets = storageContext.secrets.onDidChange((event) => {
-		if (event.key === "cline:clineAccountId") {
-			const secretValue = storageContext.secrets.get<string>(event.key)
-			const activeWebview = WebviewProvider.getVisibleInstance()
-			const controller = activeWebview?.controller
-
-			const authService = AuthService.getInstance(controller)
-			if (secretValue) {
-				// Secret was added or updated - restore auth info (login from another window)
-				authService?.restoreRefreshTokenAndRetrieveAuthInfo()
-			} else {
-				// Secret was removed - handle logout for all windows
-				authService?.handleDeauth(LogoutReason.CROSS_WINDOW_SYNC)
-			}
-		}
+	Logger.log(`[BedrockCoder] extension activated in ${performance.now() - activationStartTime} ms`)
+	localDiagnosticLogger.record({
+		name: "activation-completed",
+		category: "extension",
+		durationMs: performance.now() - activationStartTime,
 	})
-	context.subscriptions.push({ dispose: unsubSecrets })
 
-	Logger.log(`[Cline] extension activated in ${performance.now() - activationStartTime} ms`)
-
-	return createClineAPI(webview.controller)
+	return createBedrockCoderAPI(webview.controller)
 }
 
-async function showJupyterPromptInput(title: string, placeholder: string): Promise<string | undefined> {
-	return new Promise((resolve) => {
-		const quickPick = vscode.window.createQuickPick()
-		quickPick.title = title
-		quickPick.placeholder = placeholder
-		quickPick.ignoreFocusOut = true
-
-		// Allow free text input
-		quickPick.canSelectMany = false
-
-		let userInput = ""
-
-		quickPick.onDidChangeValue((value) => {
-			userInput = value
-			// Update items to show the current input
-			if (value) {
-				quickPick.items = [
-					{
-						label: "$(check) Use this prompt",
-						detail: value,
-						alwaysShow: true,
-					},
-				]
-			} else {
-				quickPick.items = []
-			}
-		})
-
-		quickPick.onDidAccept(() => {
-			if (userInput) {
-				resolve(userInput)
-				quickPick.hide()
-			}
-		})
-
-		quickPick.onDidHide(() => {
-			if (!userInput) {
-				resolve(undefined)
-			}
-			quickPick.dispose()
-		})
-
-		quickPick.show()
-	})
-}
-
-function setupHostProvider(context: ExtensionContext) {
-	const outputChannel = registerClineOutputChannel(context)
-	outputChannel.appendLine("[Cline] Setting up VS Code host...")
+function setupHostProvider(context: vscode.ExtensionContext) {
+	const outputChannel = registerBedrockCoderOutputChannel(context)
+	outputChannel.appendLine("[Bedrock Coder] Setting up VS Code host...")
 
 	const createWebview = () => new VscodeWebviewProvider(context)
 	const createEditPreview = () => new VscodeEditPreview()
@@ -634,7 +508,7 @@ function getUriPath(url: string): string | undefined {
 	}
 }
 
-async function openClineSidebarForTaskUri(): Promise<void> {
+async function openBedrockCoderSidebarForTaskUri(): Promise<void> {
 	const sidebarWaitTimeoutMs = 3000
 	const sidebarWaitIntervalMs = 50
 
@@ -648,7 +522,7 @@ async function openClineSidebarForTaskUri(): Promise<void> {
 		await new Promise((resolve) => setTimeout(resolve, sidebarWaitIntervalMs))
 	}
 
-	Logger.warn("Task URI handling timed out waiting for Cline sidebar visibility")
+	Logger.warn("Task URI handling timed out waiting for Bedrock Coder sidebar visibility")
 }
 
 async function getBinaryLocation(name: string): Promise<string> {
@@ -688,10 +562,16 @@ async function getBinaryLocation(name: string): Promise<string> {
 export async function deactivate() {
 	// Dispose Non-VSCode-specific services
 	try {
+		localDiagnosticLogger?.record({
+			name: "shutdown",
+			category: "extension",
+		})
 		await tearDown()
 	} finally {
 		// VSCode-specific services
 		disposeVscodeCommentReviewController()
+		await localDiagnosticLogger?.dispose()
+		localDiagnosticLogger = undefined
 	}
 }
 
@@ -714,40 +594,4 @@ if (IS_DEV) {
 
 		vscode.commands.executeCommand("workbench.action.reloadWindow")
 	})
-}
-
-// VSCode-specific storage migrations
-async function cleanupLegacyVSCodeStorage(context: ExtensionContext): Promise<void> {
-	try {
-		await cleanupOldApiKey(context)
-		// Migrate is not done if the new storage does not have the lastShownAnnouncementId flag
-		const hasMigrated = context.globalState.get("lastShownAnnouncementId")
-		if (hasMigrated !== undefined) {
-			return
-		}
-
-		Logger.info("[VS Code Storage Migrations] Starting")
-
-		// Migrate custom instructions to global Cline rules (one-time cleanup)
-		await migrateCustomInstructionsToGlobalRules(context)
-
-		// Migrate welcomeViewCompleted setting based on existing API keys (one-time cleanup)
-		await migrateWelcomeViewCompleted(context)
-
-		// Migrate workspace storage values back to global storage (reverting previous migration)
-		await migrateWorkspaceToGlobalStorage(context)
-
-		// Ensure taskHistory.json exists and migrate legacy state (runs once)
-		await migrateTaskHistoryToFile(context)
-
-		// Clean up MCP marketplace catalog from global state (moved to disk cache)
-		await cleanupMcpMarketplaceCatalogFromGlobalState(context)
-
-		// lastShownAnnouncementId will be set when announcement is shown
-		// after activation so we don't need to set it here.
-
-		Logger.info("[VS Code Storage Migrations] Completed")
-	} catch (error) {
-		Logger.warn(`[VS Code Storage Migrations] Failed${error instanceof Error ? `: ${error.message}` : ""}`)
-	}
 }

@@ -4,11 +4,10 @@ import type {
 	HubEventEnvelope,
 	HubReplyEnvelope,
 	SessionRecord as HubSessionRecord,
-	ITelemetryService,
 	JsonValue,
 	SessionParticipant,
-} from "@cline/shared";
-import { createSessionId } from "@cline/shared";
+} from "@bedrock-coder/shared";
+import { createSessionId } from "@bedrock-coder/shared";
 import type {
 	PendingPromptsRuntimeService,
 	RuntimeHost,
@@ -51,7 +50,6 @@ export interface HubTransportContext {
 	readonly pendingApprovals: Map<string, PendingApproval>;
 	readonly pendingCapabilityRequests: Map<string, PendingCapabilityRequest>;
 	readonly suppressNextTerminalEventBySession: Map<string, string>;
-	readonly telemetry?: ITelemetryService;
 	readonly sessionHost: RuntimeHost &
 		Partial<
 			PendingPromptsRuntimeService &

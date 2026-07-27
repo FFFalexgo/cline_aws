@@ -19,10 +19,9 @@ import {
 	type ShellExecutor,
 	type StructuredCommandInput,
 	truncateCommandOutput,
-} from "@cline/core"
-import type { AgentTool } from "@cline/shared"
-import { TerminalUserInterventionAction, telemetryService } from "@services/telemetry"
-import { ClineTempManager } from "@services/temp"
+} from "@bedrock-coder/core"
+import type { AgentTool } from "@bedrock-coder/shared"
+import { BedrockCoderTempManager } from "@services/temp"
 import * as fs from "fs"
 import { StateManager } from "@/core/storage/StateManager"
 import type { VscodeTerminalManager } from "@/hosts/vscode/terminal/VscodeTerminalManager"
@@ -49,7 +48,7 @@ export const VSCODE_FOREGROUND_RUN_COMMANDS_TIMEOUT_MS = 60 * 60 * 1000
 /**
  * Cap on the "Proceed While Running" log file. A detached devserver can log
  * for days; once the cap is hit we stop appending and note the truncation.
- * ClineTempManager's periodic cleanup (age + total-size caps) is the backstop
+ * BedrockCoderTempManager's periodic cleanup (age + total-size caps) is the backstop
  * for the files themselves.
  */
 export const PROCEED_LOG_MAX_BYTES = 10 * 1024 * 1024
@@ -61,7 +60,7 @@ export interface VscodeRunCommandsToolOptions {
 	cwd: string
 	/** Lazy factory for the VscodeTerminalManager. Called once on first foreground use. */
 	getTerminalManager: () => VscodeTerminalManager
-	/** Timeout passed to the SDK shell tool wrapper and timeout telemetry. */
+	/** Timeout passed to the SDK shell tool wrapper. */
 	bashTimeoutMs?: number
 	/** Terminal execution mode captured when this session's tool set is built. */
 	vscodeTerminalExecutionMode?: VscodeTerminalExecutionMode
@@ -114,7 +113,7 @@ interface DetachedCommandLog {
 }
 
 function createDetachedCommandLog(terminalCommand: string, existingLines: string[]): DetachedCommandLog {
-	const logFilePath = ClineTempManager.createTempFilePath("proceed-while-running")
+	const logFilePath = BedrockCoderTempManager.createTempFilePath("proceed-while-running")
 	const stream = fs.createWriteStream(logFilePath, { flags: "a" })
 	const sizeCapMessage = `[Log size cap of ${PROCEED_LOG_MAX_BYTES} bytes reached; further output is not logged.]`
 	stream.on("error", (error) => {
@@ -243,7 +242,6 @@ export async function executeForeground(
 			if (state.phase === "waiting") {
 				state.phase = "detached"
 				detachedLog = createDetachedCommandLog(terminalCommand, [])
-				telemetryService.captureTerminalUserIntervention(TerminalUserInterventionAction.PROCESS_WHILE_RUNNING, "vscode")
 				resolvePreStartControl("detach")
 			} else if (state.phase === "started") {
 				applyDetach?.()
@@ -340,6 +338,8 @@ export async function executeForeground(
 		const process = terminalManager.runCommand(terminalInfo, terminalCommand)
 		const outputLines: string[] = []
 		let droppedLines = 0
+		let detachedOutputSnapshot: string[] | undefined
+		let detachedDroppedLines = 0
 
 		// Accumulate output lines to return the full output once the command completes.
 		// The chat shows command output at completion, not incrementally.
@@ -361,25 +361,20 @@ export async function executeForeground(
 			}
 		}
 		process.on("line", bufferLine)
+		applyDetach = () => {
+			if (state.phase !== "started") {
+				return
+			}
+			state.phase = "detached"
+			detachedOutputSnapshot = [...outputLines]
+			detachedDroppedLines = droppedLines
+			detachedLog = createDetachedCommandLog(terminalCommand, detachedOutputSnapshot)
+			detachedLog.attach(process)
+			process.detach()
+		}
 
 		try {
 			applyAbort = () => process.continue()
-
-			applyDetach = () => {
-				if (detachedLog !== undefined) {
-					return
-				}
-				detachedLog = createDetachedCommandLog(terminalCommand, outputLines)
-				detachedLog.attach(process)
-				telemetryService.captureTerminalUserIntervention(TerminalUserInterventionAction.PROCESS_WHILE_RUNNING, "vscode")
-				// detach() flushes any partial line (reaching both bufferLine and
-				// the log) before resolving the awaited promise. After that the
-				// partial output is final: stop buffering so the remaining
-				// (log-only) output doesn't mutate outputLines while it's read.
-				process.detach()
-				process.removeListener("line", bufferLine)
-			}
-
 			// Wait for completion (or detach, which also resolves the promise)
 			await process
 
@@ -387,10 +382,12 @@ export async function executeForeground(
 				throw new Error("Command execution aborted")
 			}
 
+			const resultLines = detachedOutputSnapshot ?? outputLines
+			const resultDroppedLines = detachedOutputSnapshot ? detachedDroppedLines : droppedLines
 			const bufferedOutput =
-				droppedLines > 0
-					? [...outputLines, `\n... (${droppedLines} earlier lines dropped) ...\n`].join("\n")
-					: outputLines.join("\n")
+				resultDroppedLines > 0
+					? [...resultLines, `\n... (${resultDroppedLines} earlier lines dropped) ...\n`].join("\n")
+					: resultLines.join("\n")
 			const output = truncateCommandOutput(bufferedOutput.trim(), {
 				maxChars: maxOutputChars,
 			})
@@ -536,16 +533,8 @@ function createVscodeShellExecutor(options: VscodeRunCommandsToolOptions, state:
 			// essential for judging the backgroundExec-by-default change.
 			try {
 				const result = await bgExecutor(command, commandCwd || cwd, context)
-				telemetryService.captureTerminalExecution(true, "vscode", "child_process", {
-					exitCode: 0,
-					terminalExecutionMode: "backgroundExec",
-				})
 				return result
 			} catch (error) {
-				telemetryService.captureTerminalExecution(false, "vscode", "child_process", {
-					...(error instanceof CommandExitError && { exitCode: error.exitCode }),
-					terminalExecutionMode: "backgroundExec",
-				})
 				throw error
 			}
 		}

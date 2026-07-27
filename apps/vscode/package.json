@@ -1,22 +1,25 @@
 {
-	"name": "claude-dev",
-	"displayName": "Cline",
-	"description": "Autonomous coding agent right in your IDE, capable of creating/editing files, running commands, using the browser, and more with your permission every step of the way.",
-	"version": "4.0.0",
+	"name": "bedrock-coder",
+	"displayName": "Bedrock Coder",
+	"description": "A local-first VS Code coding agent powered exclusively by Amazon Bedrock.",
+	"version": "0.1.0",
 	"icon": "assets/icons/icon.png",
 	"engines": {
 		"vscode": "^1.101.0"
 	},
 	"author": {
-		"name": "Cline Bot Inc."
+		"name": "FFFalexgo"
 	},
 	"license": "Apache-2.0",
-	"publisher": "saoudrizwan",
+	"publisher": "fffalexgo",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/cline/cline"
+		"url": "https://github.com/FFFalexgo/AWS_Bedrock_Coder"
 	},
-	"homepage": "https://cline.bot",
+	"homepage": "https://github.com/FFFalexgo/AWS_Bedrock_Coder",
+	"bugs": {
+		"url": "https://github.com/FFFalexgo/AWS_Bedrock_Coder/issues"
+	},
 	"categories": [
 		"AI",
 		"Chat",
@@ -26,18 +29,14 @@
 		"Testing"
 	],
 	"keywords": [
-		"cline",
-		"claude",
-		"dev",
+		"bedrock-coder",
 		"mcp",
-		"openrouter",
 		"coding",
 		"agent",
-		"autonomous",
-		"chatgpt",
-		"sonnet",
+		"local-first",
 		"ai",
-		"llama"
+		"bedrock",
+		"aws"
 	],
 	"activationEvents": [
 		"onLanguage",
@@ -46,81 +45,20 @@
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
-		"icons": {
-			"cline-icon": {
-				"description": "cline",
-				"default": {
-					"fontPath": "assets/icons/cline-bot.woff",
-					"fontCharacter": "\\e900"
-				}
-			}
-		},
-		"walkthroughs": [
-			{
-				"id": "ClineWalkthrough",
-				"title": "Meet Cline, your new coding partner",
-				"description": "Cline codes like a developer because it thinks like one. Here are 5 ways to put it to work:",
-				"steps": [
-					{
-						"id": "welcome",
-						"title": "Start with a Goal, Not Just a Prompt",
-						"description": "Tell Cline what you want to achieve. It plans, asks, and then codes, like a true partner.",
-						"media": {
-							"markdown": "walkthrough/step1.md"
-						}
-					},
-					{
-						"id": "learn",
-						"title": "Let Cline Learn Your Codebase",
-						"description": "Point Cline to your project. It builds understanding to make smart, context-aware changes.",
-						"media": {
-							"markdown": "walkthrough/step2.md"
-						}
-					},
-					{
-						"id": "advanced-features",
-						"title": "Always Use the Best AI Models",
-						"description": "Cline empowers you with State-of-the-Art AI, connecting to top models (Anthropic, Gemini, OpenAI & more).",
-						"media": {
-							"markdown": "walkthrough/step3.md"
-						}
-					},
-					{
-						"id": "mcp",
-						"title": "Extend with Powerful Tools (MCP)",
-						"description": "Connect to databases, APIs, and other external tools through MCP.",
-						"media": {
-							"markdown": "walkthrough/step4.md"
-						}
-					},
-					{
-						"id": "getting-started",
-						"title": "You're Always in Control",
-						"description": "Review Cline's plans and diffs. Approve changes before they happen. No surprises.",
-						"media": {
-							"markdown": "walkthrough/step5.md"
-						},
-						"content": {
-							"path": "walkthrough/step5.md"
-						}
-					}
-				]
-			}
-		],
 		"viewsContainers": {
 			"activitybar": [
 				{
-					"id": "claude-dev-ActivityBar",
-					"title": "Cline",
+					"id": "bedrock-coder-ActivityBar",
+					"title": "Bedrock Coder",
 					"icon": "assets/icons/icon.svg"
 				}
 			]
 		},
 		"views": {
-			"claude-dev-ActivityBar": [
+			"bedrock-coder-ActivityBar": [
 				{
 					"type": "webview",
-					"id": "claude-dev.SidebarProvider",
+					"id": "bedrock-coder.SidebarProvider",
 					"name": "",
 					"icon": "assets/icons/icon.svg"
 				}
@@ -128,116 +66,97 @@
 		},
 		"commands": [
 			{
-				"command": "cline.plusButtonClicked",
+				"command": "bedrockCoder.plusButtonClicked",
 				"title": "New Task",
 				"icon": "$(add)"
 			},
 			{
-				"command": "cline.mcpButtonClicked",
+				"command": "bedrockCoder.mcpButtonClicked",
 				"title": "MCP Servers",
 				"icon": "$(server)"
 			},
 			{
-				"command": "cline.marketplaceButtonClicked",
-				"title": "Customize",
-				"icon": "$(wrench)"
-			},
-			{
-				"command": "cline.historyButtonClicked",
+				"command": "bedrockCoder.historyButtonClicked",
 				"title": "History",
 				"icon": "$(history)"
 			},
 			{
-				"command": "cline.accountButtonClicked",
-				"title": "Account",
-				"icon": "$(account)"
+				"command": "bedrockCoder.teamsButtonClicked",
+				"title": "Local Teams",
+				"icon": "$(organization)"
 			},
 			{
-				"command": "cline.settingsButtonClicked",
+				"command": "bedrockCoder.settingsButtonClicked",
 				"title": "Settings",
 				"icon": "$(settings-gear)"
 			},
 			{
-				"command": "cline.dev.createTestTasks",
+				"command": "bedrockCoder.dev.createTestTasks",
 				"title": "Create Test Tasks",
-				"category": "Cline",
-				"when": "cline.isDevMode"
+				"category": "Bedrock Coder",
+				"when": "bedrockCoder.isDevMode"
 			},
 			{
-				"command": "cline.dev.expireMcpOAuthTokens",
-				"title": "Expire MCP OAuth Tokens (for testing)",
-				"category": "Cline",
-				"when": "cline.isDevMode"
+				"command": "bedrockCoder.addToChat",
+				"title": "Add to Bedrock Coder",
+				"category": "Bedrock Coder"
 			},
 			{
-				"command": "cline.addToChat",
-				"title": "Add to Cline",
-				"category": "Cline"
+				"command": "bedrockCoder.addTerminalOutputToChat",
+				"title": "Add to Bedrock Coder",
+				"category": "Bedrock Coder"
 			},
 			{
-				"command": "cline.addTerminalOutputToChat",
-				"title": "Add to Cline",
-				"category": "Cline"
-			},
-			{
-				"command": "cline.focusChatInput",
+				"command": "bedrockCoder.focusChatInput",
 				"title": "Jump to Chat Input",
-				"category": "Cline"
+				"category": "Bedrock Coder"
 			},
 			{
-				"command": "cline.generateGitCommitMessage",
-				"title": "Generate Commit Message with Cline",
-				"category": "Cline",
-				"icon": "$(cline-icon)"
+				"command": "bedrockCoder.generateGitCommitMessage",
+				"title": "Generate Commit Message with Bedrock Coder",
+				"category": "Bedrock Coder",
+				"icon": "$(edit)"
 			},
 			{
-				"command": "cline.abortGitCommitMessage",
-				"title": "Generate Commit Message with Cline - Stop",
-				"category": "Cline",
+				"command": "bedrockCoder.abortGitCommitMessage",
+				"title": "Generate Commit Message with Bedrock Coder - Stop",
+				"category": "Bedrock Coder",
 				"icon": "$(debug-stop)"
 			},
 			{
-				"command": "cline.explainCode",
-				"title": "Explain with Cline",
-				"category": "Cline"
+				"command": "bedrockCoder.openDiagnosticLog",
+				"title": "Open Diagnostic Log",
+				"category": "Bedrock Coder"
 			},
 			{
-				"command": "cline.improveCode",
-				"title": "Improve with Cline",
-				"category": "Cline"
+				"command": "bedrockCoder.copySanitizedDiagnostics",
+				"title": "Copy Sanitized Diagnostics",
+				"category": "Bedrock Coder"
 			},
 			{
-				"command": "cline.jupyterGenerateCell",
-				"title": "Generate Jupyter Cell with Cline",
-				"category": "Cline",
-				"icon": "$(sparkle)"
+				"command": "bedrockCoder.clearLocalLogs",
+				"title": "Clear Local Logs",
+				"category": "Bedrock Coder"
 			},
 			{
-				"command": "cline.jupyterExplainCell",
-				"title": "Explain Jupyter Cell with Cline",
-				"category": "Cline",
-				"icon": "$(question)"
+				"command": "bedrockCoder.explainCode",
+				"title": "Explain with Bedrock Coder",
+				"category": "Bedrock Coder"
 			},
 			{
-				"command": "cline.jupyterImproveCell",
-				"title": "Improve Jupyter Cell with Cline",
-				"category": "Cline",
-				"icon": "$(lightbulb)"
+				"command": "bedrockCoder.improveCode",
+				"title": "Improve with Bedrock Coder",
+				"category": "Bedrock Coder"
 			},
 			{
-				"command": "cline.openWalkthrough",
+				"command": "bedrockCoder.openWalkthrough",
 				"title": "Open Walkthrough",
-				"category": "Cline"
-			},
-			{
-				"command": "cline.reconstructTaskHistory",
-				"title": "Reconstruct Task History",
-				"category": "Cline"
+				"category": "Bedrock Coder"
 			}
 		],
 		"keybindings": [
 			{
-				"command": "cline.addToChat",
+				"command": "bedrockCoder.addToChat",
 				"key": "cmd+'",
 				"mac": "cmd+'",
 				"win": "ctrl+'",
@@ -245,11 +164,11 @@
 				"when": "editorHasSelection"
 			},
 			{
-				"command": "cline.generateGitCommitMessage",
+				"command": "bedrockCoder.generateGitCommitMessage",
 				"when": "config.git.enabled && scmProvider == git"
 			},
 			{
-				"command": "cline.focusChatInput",
+				"command": "bedrockCoder.focusChatInput",
 				"key": "cmd+'",
 				"mac": "cmd+'",
 				"win": "ctrl+'",
@@ -260,106 +179,104 @@
 		"menus": {
 			"view/title": [
 				{
-					"command": "cline.plusButtonClicked",
+					"command": "bedrockCoder.plusButtonClicked",
 					"group": "navigation@1",
-					"when": "view == claude-dev.SidebarProvider"
+					"when": "view == bedrock-coder.SidebarProvider"
 				},
 				{
-					"command": "cline.marketplaceButtonClicked",
-					"group": "navigation@2",
-					"when": "view == claude-dev.SidebarProvider"
-				},
-				{
-					"command": "cline.historyButtonClicked",
+					"command": "bedrockCoder.historyButtonClicked",
 					"group": "navigation@3",
-					"when": "view == claude-dev.SidebarProvider"
+					"when": "view == bedrock-coder.SidebarProvider"
 				},
 				{
-					"command": "cline.accountButtonClicked",
-					"group": "navigation@5",
-					"when": "view == claude-dev.SidebarProvider"
+					"command": "bedrockCoder.teamsButtonClicked",
+					"group": "navigation@2",
+					"when": "view == bedrock-coder.SidebarProvider"
 				},
 				{
-					"command": "cline.settingsButtonClicked",
+					"command": "bedrockCoder.settingsButtonClicked",
 					"group": "navigation@6",
-					"when": "view == claude-dev.SidebarProvider"
+					"when": "view == bedrock-coder.SidebarProvider"
 				}
 			],
 			"editor/context": [
 				{
-					"command": "cline.addToChat",
+					"command": "bedrockCoder.addToChat",
 					"group": "navigation",
 					"when": "editorHasSelection"
 				}
 			],
 			"terminal/context": [
 				{
-					"command": "cline.addTerminalOutputToChat",
+					"command": "bedrockCoder.addTerminalOutputToChat",
 					"group": "navigation"
 				}
 			],
 			"scm/title": [
 				{
-					"command": "cline.generateGitCommitMessage",
+					"command": "bedrockCoder.generateGitCommitMessage",
 					"group": "navigation",
-					"when": "config.git.enabled && scmProvider == git && !cline.isGeneratingCommit"
+					"when": "config.git.enabled && scmProvider == git && !bedrockCoder.isGeneratingCommit"
 				},
 				{
-					"command": "cline.abortGitCommitMessage",
+					"command": "bedrockCoder.abortGitCommitMessage",
 					"group": "navigation",
-					"when": "config.git.enabled && scmProvider == git && cline.isGeneratingCommit"
-				}
-			],
-			"notebook/toolbar": [
-				{
-					"command": "cline.jupyterGenerateCell",
-					"group": "navigation/add@1",
-					"when": "notebookType == 'jupyter-notebook'"
-				}
-			],
-			"notebook/cell/title": [
-				{
-					"command": "cline.jupyterExplainCell",
-					"group": "inline@1",
-					"when": "notebookType == 'jupyter-notebook'"
-				},
-				{
-					"command": "cline.jupyterImproveCell",
-					"group": "inline@2",
-					"when": "notebookType == 'jupyter-notebook'"
+					"when": "config.git.enabled && scmProvider == git && bedrockCoder.isGeneratingCommit"
 				}
 			],
 			"commandPalette": [
 				{
-					"command": "cline.generateGitCommitMessage",
-					"when": "config.git.enabled && !cline.isGeneratingCommit"
+					"command": "bedrockCoder.generateGitCommitMessage",
+					"when": "config.git.enabled && !bedrockCoder.isGeneratingCommit"
 				},
 				{
-					"command": "cline.abortGitCommitMessage",
-					"when": "config.git.enabled && cline.isGeneratingCommit"
+					"command": "bedrockCoder.abortGitCommitMessage",
+					"when": "config.git.enabled && bedrockCoder.isGeneratingCommit"
 				}
 			]
 		},
 		"configuration": {
-			"title": "Cline",
-			"properties": {}
+			"title": "Bedrock Coder",
+			"properties": {
+				"bedrockCoder.maxConcurrentTeamRuns": {
+					"type": "number",
+					"default": 2,
+					"minimum": 1,
+					"maximum": 8,
+					"description": "Maximum number of local teammate runs that may execute concurrently. Additional runs remain visible in the queue."
+				},
+				"bedrockCoder.corporateAllowTerminal": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable terminal tools in corporate-safe mode. Every command still requires explicit approval; commands may access the network, so absolute no-egress deployments must also enforce operating-system or proxy restrictions."
+				},
+				"bedrockCoder.corporateAllowExternalNavigation": {
+					"type": "boolean",
+					"default": false,
+					"description": "Allow explicit user-initiated links to open in the system browser. Disabled by default because the browser may carry corporate cookies, profile state, extensions, and referrer data."
+				},
+				"bedrockCoder.corporateAllowExecutableExtensions": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable local executable hooks/plugins. Disabled by default because extension-host code cannot guarantee that a child process or plugin is network-isolated; use only with organization-approved code and an externally enforced no-network sandbox."
+				}
+			}
 		}
 	},
 	"scripts": {
 		"vscode:prepublish": "bun run package",
 		"compile": "bun run check-types && bun run lint && bun esbuild.mjs",
-		"compile-standalone": "bun run check-types && bun run lint && bun esbuild.mjs --standalone",
-		"postcompile-standalone": "node scripts/package-standalone.mjs",
 		"dev": "bun run protos && bun run watch",
 		"watch": "bun run --parallel watch:esbuild watch:tsc",
 		"watch:esbuild": "bun esbuild.mjs --watch",
 		"watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
-		"package": "bun run check-types && bun run build:webview && bun run lint && bun esbuild.mjs --production",
+		"package": "bun run check:identity && bun run check:egress && bun run check-types && bun run build:webview && bun run lint && bun esbuild.mjs --production",
+		"check:identity": "bun scripts/check-identity.mjs",
+		"check:egress": "bun scripts/check-egress-registry.mjs",
+		"check:secrets": "bun ../../security/check-secrets.mjs",
 		"protos": "node scripts/build-proto.mjs",
-		"protos-python": "node scripts/build-python-proto.mjs",
-		"download-ripgrep": "node scripts/download-ripgrep.mjs",
 		"postprotos": "biome format --config-path ./biome.jsonc src/shared/proto src/core/controller src/hosts/ webview-ui/src/services src/generated --write --no-errors-on-unmatched",
-		"clean:build": "rimraf dist dist-standalone webview-ui/build src/generated out/",
+		"clean:build": "rimraf dist webview-ui/build src/generated out/",
 		"clean:deps": "rimraf node_modules webview-ui/node_modules",
 		"clean:all": "bun run clean:build && bun run clean:deps",
 		"compile-tests": "node ./scripts/build-tests.js",
@@ -367,9 +284,9 @@
 		"check-types": "bun run protos && bunx tsc --noEmit && bun run check-types:compat && cd webview-ui && bunx tsc --noEmit",
 		"check-types:compat": "bunx tsc --project tsconfig.vscode-compat.json --noEmit",
 		"lint": "biome lint --config-path ./biome.jsonc --no-errors-on-unmatched --files-ignore-unknown=true --diagnostic-level=error && bun run lint:proto",
-		"lint:proto": "bash ./scripts/proto-lint.sh",
+		"lint:proto": "node ./scripts/proto-lint.mjs",
 		"analyze:unused": "bunx --yes knip --config knip.json --include files,exports,types,enumMembers,duplicates",
-		"analyze:unused:prod": "bunx --yes knip --config knip.json --production --include files,exports,types,enumMembers,dependencies",
+		"analyze:unused:prod": "bunx --yes knip --config knip.json --production --include files,exports,types,enumMembers",
 		"analyze:unused:fix-exports": "node scripts/remove-unused-exports.mjs --apply",
 		"analyze:unused:fix-exports:dry": "node scripts/remove-unused-exports.mjs",
 		"format": "biome format --config-path ./biome.jsonc --changed --since main --no-errors-on-unmatched --files-ignore-unknown=true --diagnostic-level=error --semicolons=as-needed",
@@ -377,7 +294,7 @@
 		"fix:all": "biome check --config-path ./biome.jsonc --no-errors-on-unmatched --files-ignore-unknown=true --write --diagnostic-level=error --unsafe --semicolons=as-needed",
 		"ci:check-all": "bun run --parallel check-types lint format",
 		"ci:build": "bun run protos && bun run build:webview && bun esbuild.mjs && bun run compile-tests",
-		"pretest": "bun run compile && bun run compile-tests && bun run compile-standalone && bun run lint",
+		"pretest": "bun run compile && bun run compile-tests && bun run lint",
 		"test": "bun run test:unit && bun run test:integration",
 		"test:integration": "bun run compile-tests && vscode-test",
 		"test:unit": "bun scripts/run-bun-unit-tests.ts",
@@ -386,9 +303,6 @@
 		"test:bun": "bun scripts/run-bun-tests.ts",
 		"test:bun:unit": "bun scripts/run-bun-unit-tests.ts",
 		"test:coverage": "bun run compile-tests && vscode-test --coverage",
-		"test:sca-server": "bun --watch scripts/test-standalone-core-api-server.ts",
-		"test:tp-orchestrator": "bun scripts/testing-platform-orchestrator.ts",
-		"dev:mcp-oauth-test-server": "bun src/dev/mcp-oauth-test-server/server.ts",
 		"e2e": "playwright test -c playwright.config.ts",
 		"test:e2e:build": "vsce package --no-dependencies --allow-package-secrets sendgrid --out dist/e2e.vsix",
 		"test:e2e": "playwright install && bun run test:e2e:build && node src/test/e2e/utils/build.mjs && playwright test",
@@ -398,20 +312,12 @@
 		"dev:webview": "node scripts/clean-webview-vite-cache.mjs && cd webview-ui && bun run dev",
 		"build:webview": "bun run protos && cd webview-ui && bun run build",
 		"test:webview": "cd webview-ui && bun run test",
-		"publish:marketplace": "node scripts/publish-marketplace.mjs",
-		"publish:marketplace:prerelease": "node scripts/publish-marketplace.mjs --pre-release",
-		"publish:marketplace:nightly": "node ./scripts/publish-nightly.mjs",
-		"docs": "cd docs && bun run dev",
-		"docs:check-links": "cd docs && bun run check",
-		"docs:rename-file": "cd docs && bun run rename",
-		"report-issue": "node scripts/report-issue.js",
-		"storybook": "cd webview-ui && bun run storybook",
-		"eval:smoke:run": "bun evals/smoke-tests/run-smoke-tests.ts"
+		"report-issue": "node scripts/report-issue.js"
 	},
 	"lint-staged": {
 		"src/shared/storage/state-keys.ts": [
 			"node scripts/generate-state-proto.mjs",
-			"git add apps/vscode/proto/cline/state.proto"
+			"git add apps/vscode/proto/bedrock_coder/state.proto"
 		],
 		"*": [
 			"biome check --write --staged --no-errors-on-unmatched --files-ignore-unknown=true --semicolons=as-needed"
@@ -420,17 +326,12 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.14",
 		"@bufbuild/buf": "^1.54.0",
-		"@microsoft/tui-test": "0.0.1",
-		"@types/better-sqlite3": "^7.6.13",
 		"@types/chai": "^5.0.1",
-		"@types/clone-deep": "^4.0.4",
 		"@types/get-folder-size": "^3.0.4",
 		"@types/js-yaml": "^4.0.9",
 		"@types/mocha": "^10.0.7",
 		"@types/node": "22.15.1",
-		"@types/pdf-parse": "^1.1.4",
 		"@types/picomatch": "^4.0.2",
-		"@types/shell-quote": "^1.7.5",
 		"@types/should": "^11.2.0",
 		"@types/sinon": "^21.0.0",
 		"@types/turndown": "^5.0.5",
@@ -441,81 +342,45 @@
 		"c8": "^10.1.3",
 		"chai": "^4.3.10",
 		"chalk": "5.6.2",
-		"dotenv": "^17.2.3",
 		"esbuild": "^0.25.0",
 		"glob": "^11.0.0",
-		"grpc-tools": "^1.13.0",
 		"lint-staged": "^16.1.0",
 		"minimatch": "^3.0.3",
 		"minimist": "^1.2.8",
 		"mocha": "^11.7.4",
 		"playwright": "^1.55.1",
-		"prebuild-install": "^7.1.3",
-		"protoc-gen-ts": "^0.8.7",
+		"@playwright/test": "^1.55.1",
 		"rimraf": "^6.0.1",
 		"should": "^13.2.3",
 		"sinon": "^21.0.3",
 		"tar": "^7.5.2",
 		"tree-kill": "^1.2.2",
+		"ts-morph": "^25.0.1",
 		"ts-proto": "^2.6.1",
 		"tsconfig-paths": "^4.2.0",
 		"typescript": "^5.4.5",
 		"vitest": "^4.0.17"
 	},
 	"dependencies": {
-		"@anthropic-ai/sdk": "^0.37.0",
 		"@bufbuild/protobuf": "^2.2.5",
-		"@cline/agents": "workspace:*",
-		"@cline/core": "workspace:*",
-		"@cline/llms": "workspace:*",
-		"@cline/shared": "workspace:*",
-		"@google/genai": "^1.30.0",
-		"@grpc/grpc-js": "^1.9.15",
-		"@grpc/proto-loader": "^0.7.13",
-		"@grpc/reflection": "^1.0.4",
+		"@aws-sdk/client-bedrock": "^3.922.0",
+		"@aws-sdk/client-sts": "^3.922.0",
+		"@bedrock-coder/agents": "workspace:*",
+		"@bedrock-coder/core": "workspace:*",
+		"@bedrock-coder/llms": "workspace:*",
+		"@bedrock-coder/shared": "workspace:*",
 		"@modelcontextprotocol/sdk": "^1.25.1",
-		"@opentelemetry/api": "^1.9.0",
-		"@opentelemetry/api-logs": "^0.56.0",
-		"@opentelemetry/core": "^2.1.0",
-		"@opentelemetry/exporter-logs-otlp-grpc": "^0.56.0",
-		"@opentelemetry/exporter-logs-otlp-http": "^0.56.0",
-		"@opentelemetry/exporter-logs-otlp-proto": "^0.56.0",
-		"@opentelemetry/exporter-metrics-otlp-grpc": "^0.56.0",
-		"@opentelemetry/exporter-metrics-otlp-http": "^0.56.0",
-		"@opentelemetry/exporter-metrics-otlp-proto": "^0.56.0",
-		"@opentelemetry/exporter-prometheus": "^0.56.0",
-		"@opentelemetry/exporter-trace-otlp-http": "^0.56.0",
-		"@opentelemetry/instrumentation": "^0.205.0",
-		"@opentelemetry/instrumentation-http": "^0.205.0",
-		"@opentelemetry/resources": "^1.30.1",
-		"@opentelemetry/sdk-logs": "^0.56.0",
-		"@opentelemetry/sdk-metrics": "^1.30.1",
-		"@opentelemetry/sdk-node": "^0.56.0",
-		"@opentelemetry/sdk-trace-base": "^2.1.0",
-		"@opentelemetry/sdk-trace-node": "^1.30.1",
-		"@opentelemetry/semantic-conventions": "^1.37.0",
-		"@playwright/test": "^1.55.1",
-		"@streamparser/json": "^0.0.22",
-		"@tailwindcss/vite": "^4.1.14",
-		"@types/uuid": "^10.0.0",
 		"@vscode/codicons": "^0.0.36",
-		"archiver": "^7.0.1",
-		"aws4fetch": "^1.0.20",
 		"axios": "1.18.0",
-		"better-sqlite3": "^12.4.1",
 		"cheerio": "^1.0.0",
 		"chokidar": "^4.0.1",
 		"chrome-launcher": "^1.1.2",
-		"clone-deep": "^4.0.1",
-		"default-shell": "^2.2.0",
 		"diff": "8.0.4",
-		"exceljs": "^4.4.0",
 		"execa": "^9.5.2",
 		"fast-deep-equal": "^3.1.3",
 		"fzf": "^0.5.2",
 		"get-folder-size": "^5.0.0",
 		"globby": "^14.0.2",
-		"grpc-health-check": "^2.0.2",
 		"iconv-lite": "^0.6.3",
 		"ignore": "^7.0.3",
 		"image-size": "^2.0.2",
@@ -523,34 +388,16 @@
 		"js-yaml": "^4.1.1",
 		"jschardet": "^3.1.4",
 		"json5": "^2.2.3",
-		"jwt-decode": "^4.0.0",
-		"mammoth": "^1.11.0",
 		"nanoid": "^5.1.6",
-		"nice-grpc": "^2.1.12",
-		"nice-grpc-common": "^2.0.3",
-		"node-machine-id": "^1.1.12",
-		"open": "^10.1.2",
-		"open-graph-scraper": "^6.9.0",
-		"openai": "^6.21.0",
-		"os-name": "^6.0.0",
-		"p-mutex": "^1.0.0",
-		"p-timeout": "^6.1.4",
 		"p-wait-for": "^5.0.2",
-		"pdf-parse": "^1.1.1",
 		"picomatch": "^4.0.3",
-		"posthog-node": "^5.8.0",
 		"puppeteer-chromium-resolver": "^23.0.0",
 		"puppeteer-core": "^23.4.0",
-		"reconnecting-eventsource": "^1.6.4",
 		"serialize-error": "^11.0.3",
-		"shell-quote": "^1.8.3",
 		"simple-git": "3.36.0",
 		"strip-ansi": "^7.1.2",
-		"tailwindcss": "^4.1.14",
-		"ts-morph": "^25.0.1",
 		"turndown": "^7.2.0",
 		"ulid": "^2.4.0",
-		"undici": "^7.26.0",
 		"uuid": "^11.1.0",
 		"vscode-uri": "^3.1.0",
 		"zod": "^4.3.6"
@@ -561,17 +408,10 @@
 			"html"
 		],
 		"exclude": [
-			"**/testing-platform/**",
 			"**/webview-ui/**",
 			"**/.vscode-test/**",
 			"**/node_modules/**",
 			"node_modules",
-			"**/dist-standalone/src/**",
-			"**/dist-standalone/vsce-extension/https:/**",
-			"**/dist-standalone/vsce-extension/**",
-			"**/dist-standalone/https:/**",
-			"**/dist-standalone/LIB/src/**",
-			"**/dist-standalone/pdfjs-dist/**",
 			"**/*.d.ts",
 			"**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs}",
 			"**/__tests__/**",
@@ -581,7 +421,6 @@
 			"**/tests-results/**",
 			"src/test/**",
 			"**/src/xml/**",
-			"**/standalone/**",
 			"**/src/generated/**",
 			"dist"
 		],

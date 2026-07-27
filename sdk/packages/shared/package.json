@@ -1,10 +1,11 @@
 {
-	"name": "@cline/shared",
-	"version": "0.0.65",
-	"description": "Shared utilities, types, and schemas for Cline packages",
+	"name": "@bedrock-coder/shared",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Shared utilities, types, and schemas for Bedrock Coder packages",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/cline/cline",
+		"url": "https://github.com/FFFalexgo/AWS_Bedrock_Coder",
 		"directory": "sdk/packages/shared"
 	},
 	"type": "module",
@@ -36,14 +37,6 @@
 		"./node": {
 			"types": "./dist/node.d.ts",
 			"import": "./dist/node.js"
-		},
-		"./automation": {
-			"types": "./dist/automation/index.d.ts",
-			"import": "./dist/automation/index.js"
-		},
-		"./remote-config": {
-			"types": "./dist/remote-config/index.d.ts",
-			"import": "./dist/remote-config/index.js"
 		}
 	},
 	"files": [
@@ -59,9 +52,7 @@
 		"node": ">=22"
 	},
 	"dependencies": {
-		"aws4fetch": "^1.0.20",
 		"jsonrepair": "^3.13.2",
-		"zod": "^4.3.6",
-		"zod-to-json-schema": "^3.25.1"
+		"zod": "^4.3.6"
 	}
 }

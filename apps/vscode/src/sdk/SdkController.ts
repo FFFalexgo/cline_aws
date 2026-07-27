@@ -2,64 +2,51 @@
 //
 // The SDK-backed Controller. It provides the same interface as the classic
 // Controller but delegates session lifecycle (initTask, askResponse,
-// cancelTask, …) to the Cline SDK (@cline/core) and bridges SDK events to
+// cancelTask, …) to the BedrockCoder SDK (@bedrock-coder/core) and bridges SDK events to
 // the webview's gRPC streams.
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
 import {
+	compareCheckpointToWorkspace,
 	createUserInstructionConfigService,
-	getProviderAuthStorageId,
-	type PreparedRemoteConfigCoreIntegration,
 	resolveDefaultMcpSettingsPath,
 	type SessionHistoryRecord,
-	setTelemetryOptOutGlobally,
 	type UserInstructionConfigService,
-} from "@cline/core"
-import { formatDisplayUserInput, type RemoteConfig, type RemoteConfigBundle } from "@cline/shared"
-import type { ApiConfiguration, ModelInfo } from "@shared/api"
+} from "@bedrock-coder/core"
+import type { CreateTeamTaskInput, TeamBoardSnapshot, TeamRunRecord, TeamTask, UpdateTeamTaskInput } from "@bedrock-coder/shared"
+import { formatDisplayUserInput } from "@bedrock-coder/shared"
 import type { ChatContent } from "@shared/ChatContent"
-import { CLINE_ACCOUNT_AUTH_ERROR_MESSAGE } from "@shared/ClineAccount"
 import { mentionRegexGlobal } from "@shared/context-mentions"
-import type { ClineApiReqInfo, ClineMessage, ExtensionState } from "@shared/ExtensionMessage"
+import type { ExtensionState } from "@shared/ExtensionMessage"
 import type { HistoryItem } from "@shared/HistoryItem"
-import { DeleteAllTaskHistoryCount, type GetTaskHistoryRequest, TaskHistoryArray, TaskResponse } from "@shared/proto/cline/task"
+import {
+	DeleteAllTaskHistoryCount,
+	type GetTaskHistoryRequest,
+	TaskHistoryArray,
+	TaskResponse,
+} from "@shared/proto/bedrock_coder/task"
 import type { Settings } from "@shared/storage/state-keys"
 import type { Mode } from "@shared/storage/types"
-import type { TelemetrySetting } from "@shared/TelemetrySetting"
-import type { ClineCheckpointRestore } from "@shared/WebviewMessage"
+import type { BedrockCoderCheckpointRestore } from "@shared/WebviewMessage"
+import * as vscode from "vscode"
+import { sendTeamBoardUpdate } from "@/core/controller/team/subscribeToTeamBoard"
 import { parseMentions } from "@/core/mentions"
 import { ensureMcpServersDirectoryExists } from "@/core/storage/disk"
-import { refreshSdkRemoteConfig } from "@/core/storage/remote-config/sdk-refresh"
-import { clearRemoteConfig } from "@/core/storage/remote-config/utils"
 import { StateManager } from "@/core/storage/StateManager"
 import { WorkspaceRootManager } from "@/core/workspace/WorkspaceRootManager"
 import { HostProvider } from "@/hosts/host-provider"
 import { VscodeTerminalManager } from "@/hosts/vscode/terminal/VscodeTerminalManager"
 import { ExtensionRegistryInfo } from "@/registry"
-import { OcaAuthService } from "@/services/auth/oca/OcaAuthService"
+import { BedrockStartupController } from "@/services/bedrock/bedrock-startup-controller"
 import { UrlContentFetcher } from "@/services/browser/UrlContentFetcher"
-import { ClineError } from "@/services/error/ClineError"
 import { McpHub } from "@/services/mcp/McpHub"
-import { telemetryService } from "@/services/telemetry"
-import type { ClineExtensionContext } from "@/shared/cline"
+import type { BedrockCoderExtensionContext } from "@/shared/bedrock-coder"
 import { ShowMessageRequest, ShowMessageType } from "@/shared/proto/host/window"
 import { Logger } from "@/shared/services/Logger"
-import { isClineManagedProvider } from "@/shared/utils/cline"
 import { arePathsEqual, getDesktopDir } from "@/utils/path"
-import { ClineAccountService } from "./account-service"
-import { AuthService, LogoutReason } from "./auth-service"
-import { buildStartSessionInput, createHistoryItemFromSession } from "./cline-session-factory"
-import { MessageTranslatorState, reshapeErrorForWebview } from "./message-translator"
-import { createProviderCatalog } from "./model-catalog/catalog"
-import type { Disposable, ProviderCatalog, ProviderConfigChange, ProviderConfigStore } from "./model-catalog/contracts"
-import { parseProviderId } from "./model-catalog/provider-id"
-import { createProviderConfigStore } from "./model-catalog/store"
-import {
-	PROVIDER_FAILURE_ERROR_TYPE,
-	PROVIDER_FAILURE_PHASE,
-	type ProviderFailureTelemetry,
-	ProviderFailureTelemetryTurnGate,
-} from "./provider-failure-telemetry"
+import { buildStartSessionInput, createHistoryItemFromSession } from "./bedrock-coder-session-factory"
+import { MessageTranslatorState } from "./message-translator"
+import { AgentRunLifecycle, sanitizeRunFailure } from "./run-lifecycle"
 import {
 	findVisibleCheckpointUserMessageByRun,
 	getCheckpointRunCountForMessage,
@@ -73,7 +60,6 @@ import { SdkInteractionCoordinator } from "./sdk-interaction-coordinator"
 import { SdkMcpCoordinator } from "./sdk-mcp-coordinator"
 import { SdkMessageCoordinator, type SessionEventListener } from "./sdk-message-coordinator"
 import { SdkModeCoordinator } from "./sdk-mode-coordinator"
-import { SdkProviderChangeCoordinator } from "./sdk-provider-change-coordinator"
 import { SdkSessionConfigBuilder } from "./sdk-session-config-builder"
 import { SdkSessionEventCoordinator } from "./sdk-session-event-coordinator"
 import { SdkSessionHistoryLoader } from "./sdk-session-history-loader"
@@ -82,18 +68,17 @@ import { SdkSessionRebuildScheduler } from "./sdk-session-rebuild-scheduler"
 import { SdkTaskControlCoordinator } from "./sdk-task-control-coordinator"
 import { SdkTaskHistory, sessionHistoryRecordToHistoryItem } from "./sdk-task-history"
 import { SdkTaskStartCoordinator } from "./sdk-task-start-coordinator"
-import { createVscodeSdkTelemetryHandle, type VscodeSdkTelemetryHandle } from "./sdk-telemetry"
 import { SdkTerminalExecutionModeCoordinator } from "./sdk-terminal-execution-mode-coordinator"
-import { isToolAutoApproved } from "./sdk-tool-policies"
+import { SdkToolResultStore, type StoredToolResult } from "./sdk-tool-result-store"
 import {
 	extractSdkUserText,
 	findSdkUserMessageIndexByOrdinal,
 	isSyntheticSdkUserMessage,
 	type SdkUserMessage,
 } from "./sdk-user-message-mapping"
+import type { SdkSessionHost } from "./session-host"
 import { StatePostDebouncer } from "./state-post-debouncer"
 import { createTaskProxy, type TaskProxy } from "./task-proxy"
-import { syncTelemetrySettingFromSharedGlobalSettings } from "./telemetry-settings-sync"
 import { TurnStateTracker } from "./turn-state-tracker"
 import { VscodeSessionHost } from "./vscode-session-host"
 import type { VscodeTerminalExecutionMode } from "./vscode-terminal-execution-mode"
@@ -110,10 +95,6 @@ function stubWarn(name: string): void {
 function metadataNumber(metadata: SessionHistoryRecord["metadata"] | undefined, key: string): number | undefined {
 	const value = metadata?.[key]
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-function usesClineAccountAuth(providerId: string): boolean {
-	return getProviderAuthStorageId(providerId) === "cline"
 }
 
 function metadataBoolean(metadata: SessionHistoryRecord["metadata"] | undefined, key: string): boolean | undefined {
@@ -158,6 +139,8 @@ export class Controller {
 	// SDK session state and the coordinators that drive it.
 	private messageTranslatorState: MessageTranslatorState
 	private turnStateTracker!: TurnStateTracker
+	private readonly runLifecycle = new AgentRunLifecycle()
+	private readonly toolResults = new SdkToolResultStore()
 	private messages: SdkMessageCoordinator
 	private sessions: SdkSessionLifecycle
 	private sessionRebuilds: SdkSessionRebuildScheduler
@@ -168,19 +151,12 @@ export class Controller {
 	private mode: SdkModeCoordinator
 	private mcpTools: SdkMcpCoordinator
 	private terminalExecutionMode: SdkTerminalExecutionModeCoordinator
-	private providerChanges: SdkProviderChangeCoordinator
 	private followups: SdkFollowupCoordinator
 	private taskControl: SdkTaskControlCoordinator
 	private taskStart: SdkTaskStartCoordinator
 	private compaction: SdkCompactionCoordinator
 	private sessionEvents: SdkSessionEventCoordinator
 	private sessionHistory: SdkSessionHistoryLoader
-	private readonly sdkTelemetry: VscodeSdkTelemetryHandle
-	private readonly providerFailureTelemetryTurnGate = new ProviderFailureTelemetryTurnGate()
-	private readonly providerConfigStore: ProviderConfigStore
-	private readonly providerCatalog: ProviderCatalog
-	private readonly providerConfigStoreSubscription: Disposable
-	private providerConfigStatePostScheduled = false
 
 	// Debounces/coalesces postStateToWebview() calls — see StatePostDebouncer.
 	private static readonly STATE_POST_DEBOUNCE_MS = 50
@@ -194,10 +170,8 @@ export class Controller {
 	task?: TaskProxy
 
 	mcpHub: McpHub
-	accountService: ClineAccountService
-	authService: AuthService
-	ocaAuthService: OcaAuthService
 	readonly stateManager: StateManager
+	readonly bedrockStartup: BedrockStartupController
 
 	// Lazy terminal manager for foreground (VS Code terminal) command execution.
 	// Created on first use; shared across all sessions in this Controller's lifetime.
@@ -217,15 +191,9 @@ export class Controller {
 	// Private state kept for stub compatibility
 	private backgroundCommandRunning = false
 	private backgroundCommandTaskId?: string
-	private pendingClineAuthRetryPrompt?: string
 	checkpointRestoreInput?: ExtensionState["checkpointRestoreInput"]
 
-	// Timer for periodic remote config fetching (enterprise policy enforcement)
-	private remoteConfigTimer?: NodeJS.Timeout
-	private remoteConfigCoreIntegration?: PreparedRemoteConfigCoreIntegration
-
-	// Watches user-instruction files (workflows/skills/rules), including those
-	// materialized by remote config under `.cline/remote-config/`. Used to expand
+	// Watches local user-instruction files (workflows/skills/rules). Used to expand
 	// `/workflow` and `/skill` slash commands into their instruction bodies before
 	// the prompt reaches the model — the same mechanism the CLI uses in
 	// `buildUserInputMessage`. The agent loop never auto-expands commands, so this
@@ -236,33 +204,17 @@ export class Controller {
 	private userInstructionServiceRoot?: string
 	private isDisposed = false
 
-	get remoteConfig(): RemoteConfig | undefined {
-		return this.remoteConfigCoreIntegration?.prepared.bundle?.remoteConfig
-	}
-
-	get remoteConfigBundle(): RemoteConfigBundle | undefined {
-		return this.remoteConfigCoreIntegration?.prepared.bundle
-	}
-
-	constructor(readonly context: ClineExtensionContext) {
+	constructor(readonly context: BedrockCoderExtensionContext) {
 		// StateManager must be initialized before creating the Controller
 		this.stateManager = StateManager.get()
-		syncTelemetrySettingFromSharedGlobalSettings(this.stateManager)
-		this.sdkTelemetry = createVscodeSdkTelemetryHandle()
 		this.statePostDebouncer = new StatePostDebouncer({
 			debounceMs: Controller.STATE_POST_DEBOUNCE_MS,
 			flush: () => this.flushStateToWebview(),
 		})
-		this.providerConfigStore = createProviderConfigStore()
-		this.providerCatalog = createProviderCatalog(this.providerConfigStore)
-		this.providerConfigStoreSubscription = this.providerConfigStore.subscribe((event) => {
-			this.handleProviderConfigChange(event)
-		})
-
-		// IMPORTANT: Use ~/.cline/data/settings/ for the settings directory,
+		// IMPORTANT: Use ~/.bedrock-coder/data/settings/ for the settings directory,
 		// NOT ensureSettingsDirectoryExists() which returns the VSCode extension
 		// storage path (HostProvider.globalStorageFsPath/settings/). The MCP
-		// settings file lives at ~/.cline/data/settings/cline_mcp_settings.json
+		// settings file lives at ~/.bedrock-coder/data/settings/mcp_settings.json
 		// (shared across VSCode, CLI, and JetBrains clients).
 		this.mcpHub = new McpHub(
 			() => ensureMcpServersDirectoryExists(),
@@ -272,16 +224,10 @@ export class Controller {
 				return settingsDir
 			},
 			ExtensionRegistryInfo.version,
-			telemetryService,
 		)
 
-		// Initialize SDK-backed auth and account services.
-		this.authService = AuthService.getInstance(this, this.sdkTelemetry.telemetry)
-		this.ocaAuthService = OcaAuthService.initialize(this)
-		this.accountService = ClineAccountService.getInstance()
-
 		// Initialize message translator state
-		this.messageTranslatorState = new MessageTranslatorState(undefined, () => this.getActiveProviderId())
+		this.messageTranslatorState = new MessageTranslatorState()
 		// Authoritative UI-mode tracker, sharing the one id/seq/epoch authority.
 		this.turnStateTracker = new TurnStateTracker(this.messageTranslatorState.getMinter())
 		this.messages = new SdkMessageCoordinator({
@@ -301,7 +247,6 @@ export class Controller {
 		})
 		this.diffEdits = new SdkDiffEditCoordinator({
 			getCwd: () => this.getWorkspaceRoot(),
-			isBackgroundEditEnabled: () => !!this.stateManager.getGlobalSettingsKey("backgroundEditEnabled"),
 		})
 		this.interactions = new SdkInteractionCoordinator({
 			messages: this.messages,
@@ -311,6 +256,14 @@ export class Controller {
 			// asks, ask_question, user_feedback) never collide with translator-minted ids.
 			getMinter: () => this.messageTranslatorState.getMinter(),
 			setTurnPhase: (phase, anchorTs) => this.turnStateTracker.set(phase, anchorTs),
+			onRunWaitingForApproval: (toolName) => {
+				const runId = this.runLifecycle.currentRunId
+				if (runId) this.runLifecycle.waitingForApproval(runId, toolName)
+			},
+			onRunResumed: () => {
+				const runId = this.runLifecycle.currentRunId
+				if (runId) this.runLifecycle.streaming(runId)
+			},
 			// Open the diff editor preview before the approval buttons render.
 			onToolApprovalAsk: (request) => this.diffEdits.openForApproval(request.toolCallId, request.toolName, request.input),
 			recordApprovedToolMessage: (toolCallId, messageTs) =>
@@ -321,14 +274,24 @@ export class Controller {
 				// manual Reject and clearPending (task cancel/abort) in one place.
 				void this.diffEdits.discardPreview(toolCallId)
 			},
-			shouldAutoApproveTool: (request) => {
-				const autoApprovalSettings = this.stateManager.getGlobalSettingsKey("autoApprovalSettings")
-				return autoApprovalSettings ? isToolAutoApproved(request.toolName, autoApprovalSettings, this.mcpHub) : false
-			},
 		})
+		const terminalEnabled = vscode.workspace.getConfiguration("bedrockCoder").get<boolean>("corporateAllowTerminal", false)
+		const getTerminalManager = terminalEnabled
+			? () => {
+					if (!this._terminalManager) {
+						this._terminalManager = new VscodeTerminalManager()
+						this.applyTerminalSettings(this._terminalManager)
+						Logger.log("[SdkController] Created VscodeTerminalManager for foreground terminal execution")
+					}
+					return this._terminalManager
+				}
+			: undefined
+		if (!terminalEnabled) {
+			Logger.log("[SdkController] Terminal tools are disabled by the corporate-safe default")
+		}
+
 		this.sessions = new SdkSessionLifecycle({
 			mcpHub: this.mcpHub,
-			telemetry: this.sdkTelemetry.telemetry,
 			requestToolApproval: (request) => this.interactions.handleRequestToolApproval(request),
 			askQuestion: (question, options, context) => this.interactions.handleAskQuestion(question, options, context),
 			editorExecutor: (input, cwd, context) => this.diffEdits.executeEditorTool(input, cwd, context),
@@ -337,90 +300,53 @@ export class Controller {
 				this.sessionEvents.handleSessionEvent(event).catch((err) => {
 					Logger.error("[SdkController] Failed to handle session event:", err)
 				})
+				if (event.type === "team_progress") {
+					sendTeamBoardUpdate(this)
+				}
 			},
 			onDidBecomeIdle: () => this.handleSessionBecameIdle(),
-			getRemoteConfigIntegration: () => this.remoteConfigCoreIntegration,
 			foregroundCommands: this.foregroundCommands,
-			getTerminalManager: () => {
-				// Guarded by getEffectiveTerminalExecutionMode() at the read sites
-				// (vscode-session-host.ts, sdk-terminal-execution-mode-coordinator.ts):
-				// this factory itself is only invoked when a caller has already
-				// resolved to "vscodeTerminal" mode on a real VS Code host, but
-				// VscodeTerminalManager's constructor still assumes
-				// vscode.window.onDidStartTerminalShellExecution exists, which the
-				// standalone (JetBrains/CLI) stub does not provide.
-				if (!this._terminalManager) {
-					this._terminalManager = new VscodeTerminalManager()
-					this.applyTerminalSettings(this._terminalManager)
-					Logger.log("[SdkController] Created VscodeTerminalManager for foreground terminal execution")
-				}
-				return this._terminalManager
-			},
-			onSendStart: () => {
-				this.beginProviderFailureTelemetryTurn()
-			},
+			getTerminalManager,
 			// this.mode is assigned later in this constructor; the closure only
 			// runs at send time, long after construction completes.
 			consumeModeSwitchNotice: (sessionId) => this.mode.consumeModeSwitchNotice(sessionId),
 			onSendComplete: async () => {
 				// Normal flows close their diff sessions inline; anything left here is orphaned.
 				void this.diffEdits.discardAllPreviews("turn complete")
+				const runId = this.runLifecycle.currentRunId
+				if (runId) this.runLifecycle.complete(runId)
 
 				this.postStateToWebview().catch((err) => {
 					Logger.error("[SdkController] Failed to post state after turn:", err)
 				})
 			},
+			onRequestSent: (sessionId) => {
+				const runId = this.runLifecycle.currentRunId
+				if (runId) {
+					this.runLifecycle.bindSession(runId, sessionId)
+					this.runLifecycle.requestSent(runId)
+					void this.postStateToWebview()
+				}
+			},
 			onSendError: async (error, sessionId) => {
-				// A turn failed — the UI shows error recovery (Retry / Sign In / Add Credits).
+				// A turn failed — surface the sanitized provider error and allow retry.
 				void this.diffEdits.discardAllPreviews("turn error")
 				this.turnStateTracker.set("error")
+				const runId = this.runLifecycle.currentRunId
+				if (runId) this.runLifecycle.fail(runId, sanitizeRunFailure(error, "stream"))
 				const errorMessage = error instanceof Error ? error.message : String(error)
-				const providerId = this.getSessionProviderId(sessionId) ?? this.getActiveProviderId()
-				const isClineAuthError =
-					isClineManagedProvider(providerId) &&
-					(errorMessage.includes(CLINE_ACCOUNT_AUTH_ERROR_MESSAGE) ||
-						errorMessage.toLowerCase().includes("missing api key") ||
-						errorMessage.toLowerCase().includes("unauthorized"))
-
-				if (isClineAuthError) {
-					this.captureProviderFailure({
-						sessionId,
-						error,
-						providerId,
-						errorType: PROVIDER_FAILURE_ERROR_TYPE.AUTH,
-						failurePhase: PROVIDER_FAILURE_PHASE.PREFLIGHT,
-					})
-					this.emitClineAuthError()
-				} else if (isClineManagedProvider(providerId) && this.isClineBalanceError(errorMessage)) {
-					this.captureProviderFailure({
-						sessionId,
-						error,
-						providerId,
-						errorType: PROVIDER_FAILURE_ERROR_TYPE.BALANCE,
-						failurePhase: PROVIDER_FAILURE_PHASE.PREFLIGHT,
-					})
-					this.emitClineBalanceError(errorMessage)
-				} else {
-					this.captureProviderFailure({
-						sessionId,
-						error,
-						providerId,
-						errorType: PROVIDER_FAILURE_ERROR_TYPE.SEND_ERROR,
-						failurePhase: PROVIDER_FAILURE_PHASE.STREAMING,
-					})
-					this.messages.emitSessionEvents(
-						[
-							{
-								ts: Date.now(),
-								type: "say",
-								say: "error",
-								text: `Agent error: ${errorMessage}`,
-								partial: false,
-							},
-						],
-						{ type: "status", payload: { sessionId, status: "error" } },
-					)
-				}
+				this.messages.emitSessionEvents(
+					[
+						{
+							ts: Date.now(),
+							type: "say",
+							say: "error",
+							text: `Agent error: ${errorMessage}`,
+							partial: false,
+						},
+					],
+					{ type: "status", payload: { sessionId, status: "error" } },
+				)
 				this.postStateToWebview().catch(() => {})
 			},
 		})
@@ -428,8 +354,6 @@ export class Controller {
 		this.taskHistory = new SdkTaskHistory({
 			mcpHub: this.mcpHub,
 			sessions: this.sessions,
-			legacyExtensionStorageDir: this.context.globalStorageUri.fsPath,
-			telemetry: telemetryService,
 			// History rendering mints ids from the shared authority so regenerated history ids
 			// never overlap live-session ids.
 			getMinter: () => this.messageTranslatorState.getMinter(),
@@ -445,7 +369,6 @@ export class Controller {
 			loadInitialMessages: async (sdkHost, sessionId) =>
 				(await this.sessionHistory.loadInitialMessages(sdkHost, sessionId)) ?? [],
 			buildStartSessionInput,
-			emitClineAuthError: () => this.emitClineAuthErrorWithTelemetry(),
 			resetMessageTranslator: () => this.resetMessageTranslatorAndFence(),
 			postStateToWebview: () => this.postStateToWebview(),
 			getTurnPhase: () => this.turnStateTracker.currentPhase,
@@ -483,19 +406,6 @@ export class Controller {
 			postStateToWebview: () => this.postStateToWebview(),
 			rebuilds: this.sessionRebuilds,
 		})
-		this.providerChanges = new SdkProviderChangeCoordinator({
-			stateManager: this.stateManager,
-			sessions: this.sessions,
-			messages: this.messages,
-			sessionConfigBuilder: this.sessionConfigBuilder,
-			getTask: () => this.task,
-			getWorkspaceRoot: () => this.getWorkspaceRoot(),
-			loadInitialMessages: async (sdkHost, sessionId) =>
-				(await this.sessionHistory.loadInitialMessages(sdkHost, sessionId)) ?? [],
-			buildStartSessionInput,
-			postStateToWebview: () => this.postStateToWebview(),
-			rebuilds: this.sessionRebuilds,
-		})
 		this.followups = new SdkFollowupCoordinator({
 			stateManager: this.stateManager,
 			interactions: this.interactions,
@@ -513,8 +423,6 @@ export class Controller {
 			loadInitialMessages: (sessionHost, taskId) => this.sessionHistory.loadInitialMessages(sessionHost, taskId),
 			buildStartSessionInput,
 			resolveContextMentions: (text) => this.resolveContextMentions(text),
-			isClineManagedProviderActive: () => this.isClineManagedProviderActive(),
-			emitClineAuthError: () => this.emitClineAuthErrorWithTelemetry(),
 			resetMessageTranslator: () => this.resetMessageTranslatorAndFence(),
 			postStateToWebview: () => this.postStateToWebview(),
 			onResumeFailed: () => {
@@ -550,7 +458,6 @@ export class Controller {
 			buildStartSessionInput,
 			createHistoryItemFromSession,
 			clearTask: async () => {
-				this.pendingClineAuthRetryPrompt = undefined
 				await this.taskControl.clearTask()
 			},
 			setTask: (task) => {
@@ -562,10 +469,34 @@ export class Controller {
 			createTempSessionHost: () => VscodeSessionHost.create({ mcpHub: this.mcpHub }),
 			loadInitialMessages: (reader, taskId) => this.sessionHistory.loadInitialMessages(reader, taskId),
 			resolveContextMentions: (text) => this.resolveContextMentions(text),
-			isClineManagedProviderActive: () => this.isClineManagedProviderActive(),
-			emitClineAuthError: (task) => this.emitClineAuthErrorWithTelemetry(task),
-			captureProviderApiError: (event) => this.captureProviderFailure(event),
 			postStateToWebview: () => this.postStateToWebview(),
+			revalidateBedrockForResume: async (taskId) => {
+				const sourceRecord = await this.taskHistory.getSessionRecord(taskId)
+				const savedTarget = sourceRecord?.metadata?.bedrockTarget
+				const targetRecord =
+					savedTarget && typeof savedTarget === "object" && !Array.isArray(savedTarget)
+						? (savedTarget as Record<string, unknown>)
+						: undefined
+				const invocationId =
+					(typeof targetRecord?.invocationId === "string" && targetRecord.invocationId.trim()) ||
+					sourceRecord?.model?.trim()
+				if (invocationId) {
+					this.stateManager.setGlobalStateBatch({
+						planModeApiModelId: invocationId,
+						actModeApiModelId: invocationId,
+					})
+				}
+				await this.bedrockStartup.start(true)
+				this.bedrockStartup.assertReady()
+			},
+			onSessionAssigned: (sessionId) => {
+				const runId = this.runLifecycle.currentRunId
+				if (runId) this.runLifecycle.bindSession(runId, sessionId)
+			},
+			onInitError: (error) => {
+				const runId = this.runLifecycle.currentRunId
+				if (runId) this.runLifecycle.fail(runId, sanitizeRunFailure(error, "persistence", { retrySafe: true }))
+			},
 		})
 		this.compaction = new SdkCompactionCoordinator({
 			stateManager: this.stateManager,
@@ -580,12 +511,19 @@ export class Controller {
 			sessions: this.sessions,
 			messages: this.messages,
 			taskHistory: this.taskHistory,
-			stateManager: this.stateManager,
 			getTask: () => this.task,
 			postStateToWebview: () => this.postStateToWebview(),
 			setTurnPhase: (phase, anchorTs) => this.turnStateTracker.set(phase, anchorTs),
-			captureProviderApiError: (event) => this.captureProviderFailure(event),
-			beginProviderFailureTelemetryTurn: () => this.beginProviderFailureTelemetryTurn(),
+			runLifecycle: this.runLifecycle,
+			toolResults: this.toolResults,
+			onQueuedPromptSubmitted: (sessionId) => {
+				const runId = this.runLifecycle.begin({
+					sessionId,
+					invocationId: this.bedrockStartup.state.selectedTarget?.invocationId,
+				})
+				this.runLifecycle.requestSent(runId)
+				return runId
+			},
 		})
 		// Subscribe to MCP tool list changes so we can restart the SDK session
 		// when servers are added/removed/reconnected. The SDK's DefaultSessionBuilder
@@ -602,46 +540,21 @@ export class Controller {
 		// Register the bridge as a session event listener
 		this.onSessionEvent(this.grpcBridge.createListener())
 
-		// Restore auth state from secrets on startup, then start the remote
-		// config polling timer (enterprise policy enforcement). The timer must
-		// start after auth is restored so remote config can identify the user's
-		// organization and apply org-level policies.
-		this.authService
-			.restoreRefreshTokenAndRetrieveAuthInfo()
-			.then(() => {
-				this.startRemoteConfigTimer()
+		this.bedrockStartup = new BedrockStartupController({
+			stateManager: this.stateManager,
+			workspaceRoot: async () => this.getWorkspaceRoot(),
+			logDirectory: path.join(this.context.globalStorageUri.fsPath, "logs"),
+			onStateChanged: () => this.postStateToWebview(),
+		})
+		if (process.env.NODE_ENV !== "test" && process.env.VITEST !== "true") {
+			queueMicrotask(() => {
+				void this.bedrockStartup.start().catch((error) => {
+					Logger.error("[SdkController] Bedrock startup doctor failed:", error)
+				})
 			})
-			.catch((err) => {
-				Logger.error("[SdkController] Failed to restore auth state:", err)
-			})
-
-		Logger.log("[SdkController] Initialized with SDK adapter layer + gRPC bridge + auth services")
-	}
-
-	getProviderConfigStore(): ProviderConfigStore {
-		return this.providerConfigStore
-	}
-
-	getProviderCatalog(): ProviderCatalog {
-		return this.providerCatalog
-	}
-
-	invalidateProviderListings(): void {
-		this.providerCatalog.invalidateProviderListings()
-	}
-
-	private handleProviderConfigChange(event: ProviderConfigChange): void {
-		this.scheduleProviderConfigStatePost()
-
-		if (event.kind === "selection" && this.isSelectionForActiveModeProvider(event)) {
-			this.sessions
-				?.updateActiveSessionModel(event.selection.modelId)
-				.catch((error) => Logger.error("[SdkController] Failed to update active session model:", error))
 		}
-	}
 
-	handleApiConfigurationChanged(previous: ApiConfiguration, next: ApiConfiguration): void {
-		this.providerChanges.handleApiConfigurationChanged(previous, next)
+		Logger.log("[SdkController] Initialized with the Bedrock SDK adapter and gRPC bridge")
 	}
 
 	handleTerminalExecutionModeChanged(previous: VscodeTerminalExecutionMode, next: VscodeTerminalExecutionMode): void {
@@ -661,72 +574,6 @@ export class Controller {
 		this.sessionRebuilds?.sessionBecameIdle()
 	}
 
-	private isSelectionForActiveModeProvider(event: Extract<ProviderConfigChange, { kind: "selection" }>): boolean {
-		try {
-			const modeValue = this.stateManager.getGlobalSettingsKey("mode")
-			const mode = modeValue === "plan" ? "plan" : "act"
-			if (event.mode !== mode) {
-				return false
-			}
-
-			const apiConfig = this.stateManager.getApiConfiguration()
-			const activeProvider = mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider
-			return activeProvider === event.providerId.toString()
-		} catch {
-			return false
-		}
-	}
-
-	private scheduleProviderConfigStatePost(): void {
-		if (this.providerConfigStatePostScheduled) {
-			return
-		}
-
-		this.providerConfigStatePostScheduled = true
-		queueMicrotask(() => {
-			this.providerConfigStatePostScheduled = false
-			this.postStateToWebview().catch((error) => {
-				Logger.error("[SdkController] Failed to post state after provider config change:", error)
-			})
-		})
-	}
-
-	/**
-	 * Starts the periodic remote config fetching timer. Fetches immediately
-	 * and then every hour, to enforce enterprise policy (provider lockdown,
-	 * MCP server management, OpenTelemetry, etc.).
-	 */
-	private startRemoteConfigTimer(): void {
-		// Initial fetch
-		this.refreshRemoteConfig().catch((err) => Logger.error("[SdkController] Initial remote config refresh failed:", err))
-		// Set up 1-hour interval
-		this.remoteConfigTimer = setInterval(() => {
-			this.refreshRemoteConfig().catch((err) => Logger.error("[SdkController] Remote config timer failed:", err))
-		}, 3600000) // 1 hour
-	}
-
-	private async refreshRemoteConfig(): Promise<void> {
-		await refreshSdkRemoteConfig(this, {
-			workspacePath: await this.getRemoteConfigWorkspacePath(),
-		})
-		// Remote config may have materialized new workflows/skills/rules under
-		// `.cline/remote-config/`. Refresh the watcher so slash-command expansion
-		// sees them without waiting on filesystem events.
-		await this.refreshUserInstructionWatchers()
-	}
-
-	async setRemoteConfigCoreIntegration(integration: PreparedRemoteConfigCoreIntegration | undefined): Promise<void> {
-		const previous = this.remoteConfigCoreIntegration
-		this.remoteConfigCoreIntegration = integration
-		if (previous && previous !== integration) {
-			try {
-				await previous.dispose()
-			} catch (error) {
-				Logger.error("[SdkController] Failed to dispose previous remote config integration:", error)
-			}
-		}
-	}
-
 	async invalidateUserInstructionService(): Promise<void> {
 		const userInstructionServicePromise = this.userInstructionService
 		this.userInstructionService = undefined
@@ -737,14 +584,10 @@ export class Controller {
 	}
 
 	async dispose(): Promise<void> {
-		this.providerConfigStoreSubscription.dispose()
-		// Clear the remote config timer to prevent stale fetches
-		if (this.remoteConfigTimer) {
-			clearInterval(this.remoteConfigTimer)
-			this.remoteConfigTimer = undefined
-		}
-		await this.setRemoteConfigCoreIntegration(undefined)
 		this.isDisposed = true
+		this.bedrockStartup.dispose()
+		this.sessionEvents.dispose()
+		this.toolResults.clear()
 		// Tear down the debounced state-post machinery before downstream resources
 		// are disposed below — see StatePostDebouncer.dispose().
 		await this.statePostDebouncer.dispose()
@@ -758,7 +601,6 @@ export class Controller {
 		await this.taskHistory.dispose()
 		this.mcpHub?.dispose?.()
 		this.messages.dispose()
-		await this.sdkTelemetry.dispose()
 		Logger.log("[SdkController] Disposed")
 	}
 
@@ -767,8 +609,7 @@ export class Controller {
 	/**
 	 * Lazily create (or rebuild on workspace-root change) the user-instruction
 	 * watcher. Pointed at the workspace root so it discovers both local config
-	 * (`.clinerules/workflows`, `.cline/workflows`, …) and remote-config files
-	 * materialized under `<root>/.cline/remote-config/{workflows,skills,rules}`.
+	 * from supported workspace and user configuration directories.
 	 *
 	 * `workspaceRoot` is resolved by the caller so the memoization check below runs
 	 * synchronously on entry — there is no `await` before the assignment, so
@@ -829,24 +670,6 @@ export class Controller {
 	}
 
 	/**
-	 * Refresh the user-instruction watcher after remote config is (re)materialized
-	 * so newly written workflows/skills/rules are picked up immediately rather than
-	 * waiting on filesystem watch events.
-	 */
-	private async refreshUserInstructionWatchers(): Promise<void> {
-		const servicePromise = this.userInstructionService
-		if (!servicePromise) {
-			return
-		}
-		try {
-			const service = await servicePromise
-			await Promise.all([service.refreshType("workflow"), service.refreshType("skill"), service.refreshType("rule")])
-		} catch (error) {
-			Logger.warn("[SdkController] Failed to refresh user instruction watchers:", error)
-		}
-	}
-
-	/**
 	 * Expand slash commands, then resolve `@` context mentions in user text
 	 * before sending to the SDK.
 	 *
@@ -902,46 +725,86 @@ export class Controller {
 		return noWorkspaceFallback
 	}
 
-	private async getRemoteConfigWorkspacePath(): Promise<string | undefined> {
-		try {
-			const { paths } = await HostProvider.workspace.getWorkspacePaths({})
-			if (!paths.length) {
-				return undefined
-			}
-			return resolveWorkspaceRootPath(paths, paths[0])
-		} catch (error) {
-			Logger.warn("[SdkController] Failed to get workspace paths for remote config, using global fallback:", error)
-			return undefined
-		}
-	}
-
 	// ---- Session event subscription ----
 
 	/**
-	 * Subscribe to session events translated to ClineMessages.
+	 * Subscribe to session events translated to BedrockCoderMessages.
 	 * Returns an unsubscribe function.
 	 */
 	onSessionEvent(listener: SessionEventListener): () => void {
 		return this.messages.onSessionEvent(listener)
 	}
 
-	/**
-	 * Get the active API provider for the current mode.
-	 */
-	private getActiveProviderId(): string | undefined {
-		try {
-			const apiConfig = this.stateManager.getApiConfiguration()
-			const modeValue = this.stateManager.getGlobalSettingsKey("mode")
-			const mode = modeValue === "plan" ? "plan" : "act"
-			return mode === "plan" ? apiConfig.planModeApiProvider : apiConfig.actModeApiProvider
-		} catch {
-			return undefined
+	getActiveTeamBoard(): TeamBoardSnapshot | undefined {
+		const active = this.sessions.getActiveSession()
+		return active?.sdkHost.getTeamBoard?.(active.sessionId)
+	}
+
+	createActiveTeamTask(input: Omit<CreateTeamTaskInput, "createdBy">): TeamTask {
+		const active = this.sessions.getActiveSession()
+		if (!active?.sdkHost.createTeamTask) {
+			throw new Error("No active local team session")
 		}
+		const task = active.sdkHost.createTeamTask(active.sessionId, input)
+		sendTeamBoardUpdate(this)
+		return task
+	}
+
+	updateActiveTeamTask(input: UpdateTeamTaskInput): TeamTask {
+		const active = this.sessions.getActiveSession()
+		if (!active?.sdkHost.updateTeamTask) {
+			throw new Error("No active local team session")
+		}
+		const task = active.sdkHost.updateTeamTask(active.sessionId, input)
+		sendTeamBoardUpdate(this)
+		return task
+	}
+
+	cancelActiveTeamRun(runId: string, reason?: string): TeamRunRecord {
+		const active = this.sessions.getActiveSession()
+		if (!active?.sdkHost.cancelTeamRun) {
+			throw new Error("No active local team session")
+		}
+		const run = active.sdkHost.cancelTeamRun(active.sessionId, runId, reason)
+		sendTeamBoardUpdate(this)
+		return run
 	}
 
 	private getTaskModelId(): string | undefined {
 		const modelId = this.task?.api?.getModel?.().id?.trim()
 		return modelId && modelId !== "unknown" ? modelId : undefined
+	}
+
+	async getLocalDiagnosticContext(): Promise<{
+		taskId?: string
+		teamTaskId?: string
+		worktreePath?: string
+		checkpointId?: string
+	}> {
+		const activeSession = this.sessions.getActiveSession()
+		const taskId = activeSession?.sessionId ?? this.task?.taskId
+		const record = activeSession && taskId ? await activeSession.sdkHost.get(taskId).catch(() => undefined) : undefined
+		const latestCheckpoint =
+			record?.metadata?.checkpoint &&
+			typeof record.metadata.checkpoint === "object" &&
+			!Array.isArray(record.metadata.checkpoint)
+				? (record.metadata.checkpoint as Record<string, unknown>).latest
+				: undefined
+		const checkpoint =
+			latestCheckpoint && typeof latestCheckpoint === "object" && !Array.isArray(latestCheckpoint)
+				? (latestCheckpoint as Record<string, unknown>)
+				: undefined
+		const board = activeSession?.sdkHost.getTeamBoard?.(activeSession.sessionId)
+		const linkedTask = board?.tasks.find((candidate) => candidate.sessionId === taskId)
+		return {
+			taskId,
+			teamTaskId: linkedTask?.id,
+			worktreePath: linkedTask?.worktreePath,
+			checkpointId:
+				(typeof checkpoint?.checkpointId === "string" && checkpoint.checkpointId) ||
+				(typeof checkpoint?.ref === "string" && checkpoint.ref) ||
+				undefined,
+		}
 	}
 
 	private getSessionProviderId(sessionId?: string): string | undefined {
@@ -963,190 +826,6 @@ export class Controller {
 		return modelId && modelId !== "unknown" ? modelId : undefined
 	}
 
-	private beginProviderFailureTelemetryTurn(): void {
-		this.providerFailureTelemetryTurnGate.beginTurn()
-	}
-
-	/**
-	 * Check if the active API provider uses Cline account auth for the current mode.
-	 */
-	private isClineManagedProviderActive(): boolean {
-		return isClineManagedProvider(this.getActiveProviderId())
-	}
-
-	private captureProviderFailure(event: ProviderFailureTelemetry): void {
-		const ulid = event.sessionId ?? this.task?.taskId ?? this.sessions.getActiveSession()?.sessionId
-		if (!ulid) {
-			return
-		}
-		if (
-			event.failurePhase === PROVIDER_FAILURE_PHASE.STREAMING &&
-			!this.providerFailureTelemetryTurnGate.shouldCaptureStreamingFailure()
-		) {
-			return
-		}
-
-		const provider = event.providerId ?? this.getSessionProviderId(event.sessionId) ?? "unknown"
-		const model = event.modelId ?? this.getSessionModelId(event.sessionId) ?? this.getTaskModelId() ?? "unknown"
-		const clineError = ClineError.transform(event.error, model, provider)
-
-		telemetryService.captureProviderApiError({
-			ulid,
-			model,
-			provider,
-			errorMessage: clineError.message || String(event.error),
-			errorStatus: clineError.status,
-			requestId: clineError.requestId,
-			errorType: event.errorType,
-			failurePhase: event.failurePhase,
-		})
-	}
-
-	private emitClineAuthErrorWithTelemetry(task?: string, sessionId?: string): void {
-		this.emitClineAuthError(task)
-		this.captureProviderFailure({
-			sessionId: sessionId ?? this.task?.taskId,
-			error: CLINE_ACCOUNT_AUTH_ERROR_MESSAGE,
-			providerId: this.getActiveProviderId(),
-			errorType: PROVIDER_FAILURE_ERROR_TYPE.AUTH,
-			failurePhase: PROVIDER_FAILURE_PHASE.PREFLIGHT,
-		})
-	}
-
-	/**
-	 * Emit a proper auth error for the 'cline' provider when the user is not
-	 * logged in. The message sequence drives ErrorRow to render the
-	 * "Sign in to Cline" button.
-	 *
-	 * Message sequence:
-	 *   1. say:'task'           – the user's message text
-	 *   2. say:'api_req_started' – opens the API request row
-	 *   3. ask:'api_req_failed'  – ClineError JSON → ErrorRow renders auth UI
-	 */
-	private emitClineAuthError(task?: string): void {
-		const ts = Date.now()
-		this.pendingClineAuthRetryPrompt = task
-
-		if (!this.task) {
-			this.task = createTaskProxy(
-				`auth-error-${ts}`,
-				(text?: string, images?: string[], files?: string[]) => this.askResponse(text, images, files),
-				() => this.cancelTask(),
-			)
-		}
-
-		const clineError = new ClineError(
-			{ message: CLINE_ACCOUNT_AUTH_ERROR_MESSAGE, status: 401 },
-			undefined, // modelId
-			"cline",
-		)
-		const serializedError = clineError.serialize()
-
-		const failedAskTs = ts + 2
-		const messages: ClineMessage[] = [
-			{
-				ts,
-				type: "say",
-				say: "task",
-				text: task ?? "",
-				partial: false,
-			},
-			{
-				ts: ts + 1,
-				type: "say",
-				say: "api_req_started",
-				text: JSON.stringify({
-					streamingFailedMessage: serializedError,
-				} satisfies ClineApiReqInfo),
-				partial: false,
-			},
-			{
-				ts: failedAskTs,
-				type: "ask",
-				ask: "api_req_failed",
-				text: serializedError,
-				partial: false,
-			},
-		]
-
-		this.turnStateTracker.set("error", failedAskTs)
-
-		this.messages.appendAndEmit(messages, {
-			type: "status",
-			payload: {
-				sessionId: this.sessions.getActiveSession()?.sessionId ?? "",
-				status: "error",
-			},
-		})
-
-		this.postStateToWebview().catch(() => {})
-	}
-
-	/**
-	 * Check if an error message indicates an insufficient credits / balance error
-	 * by reshaping it into ClineError format and inspecting the result.
-	 */
-	private isClineBalanceError(errorMessage: string): boolean {
-		try {
-			const shaped = JSON.parse(reshapeErrorForWebview({ message: errorMessage }))
-			return shaped.code === "insufficient_credits"
-		} catch {
-			return false
-		}
-	}
-
-	/**
-	 * Emit a balance error for the 'cline' provider when the user has insufficient
-	 * credits. Produces the same message sequence as emitClineAuthError so the
-	 * webview renders the "Buy Credits" button via CreditLimitError.
-	 *
-	 * Message sequence:
-	 *   1. say:'api_req_started' – streamingFailedMessage holds the ClineError JSON
-	 *   2. ask:'api_req_failed'  – ClineError JSON → ErrorRow renders balance UI
-	 */
-	private emitClineBalanceError(rawErrorMessage: string): void {
-		const ts = Date.now()
-
-		// reshapeErrorForWebview extracts structured fields from the SDK error
-		// message (which may be plain text or embedded JSON) and produces the
-		// ClineError-serialized JSON that the webview's ErrorRow expects.
-		const serializedError = reshapeErrorForWebview({
-			message: rawErrorMessage,
-		})
-
-		const failedAskTs = ts + 1
-		const messages: ClineMessage[] = [
-			{
-				ts,
-				type: "say",
-				say: "api_req_started",
-				text: JSON.stringify({
-					streamingFailedMessage: serializedError,
-				} satisfies ClineApiReqInfo),
-				partial: false,
-			},
-			{
-				ts: failedAskTs,
-				type: "ask",
-				ask: "api_req_failed",
-				text: serializedError,
-				partial: false,
-			},
-		]
-
-		this.turnStateTracker.set("error", failedAskTs)
-
-		this.messages.appendAndEmit(messages, {
-			type: "status",
-			payload: {
-				sessionId: this.sessions.getActiveSession()?.sessionId ?? "",
-				status: "error",
-			},
-		})
-
-		this.postStateToWebview().catch(() => {})
-	}
-
 	// ---- Task lifecycle ----
 
 	async initTask(
@@ -1156,10 +835,16 @@ export class Controller {
 		historyItem?: HistoryItem,
 		taskSettings?: Partial<Settings>,
 	): Promise<string | undefined> {
-		// Fire-and-forget: ensure we have the latest remote config (enterprise
-		// policies like yoloModeAllowed, allowedMCPServers, etc.) without
-		// blocking the UI.
-		this.refreshRemoteConfig().catch((err) => Logger.error("[SdkController] Remote config refresh before task failed:", err))
+		this.bedrockStartup.assertReady()
+		const hasPrompt = Boolean(prompt?.trim() || images?.length || files?.length)
+		if (hasPrompt) {
+			this.runLifecycle.begin({
+				invocationId: this.bedrockStartup.state.selectedTarget?.invocationId,
+			})
+			void this.postStateToWebview()
+		} else {
+			this.runLifecycle.reset()
+		}
 		// A new task is starting — the agent is about to stream.
 		this.turnStateTracker.set("streaming")
 		// Clear the previous turn's completion signal so this turn's phase is computed fresh.
@@ -1168,17 +853,25 @@ export class Controller {
 	}
 
 	async reinitExistingTaskFromId(taskId: string): Promise<void> {
+		this.runLifecycle.reset()
 		this.turnStateTracker.set("streaming")
 		this.messageTranslatorState.clearTurnOutcome()
 		await this.taskStart.reinitExistingTaskFromId(taskId)
 	}
 
 	async cancelTask(): Promise<void> {
+		const runId = this.runLifecycle.currentRunId
+		if (runId) {
+			this.runLifecycle.requestCancellation(runId)
+			void this.postStateToWebview()
+		}
 		// Fence first: mark resumable before aborting so any straggler events from the aborted
 		// turn land on the wrong side of the UI mode. (Full fence-before-abort epoch bump lands
 		// in S6; this sets the authoritative phase now.)
 		this.turnStateTracker.set("resumable")
 		await this.taskControl.cancelTask()
+		if (runId) this.runLifecycle.cancelled(runId)
+		await this.postStateToWebview()
 	}
 
 	async cancelBackgroundCommand(): Promise<void> {
@@ -1233,9 +926,9 @@ export class Controller {
 	}
 
 	async clearTask(): Promise<void> {
-		this.pendingClineAuthRetryPrompt = undefined
 		// No active task — UI returns to idle (input enabled, no buttons/thinking).
 		this.turnStateTracker.set("idle")
+		this.runLifecycle.reset()
 		await this.taskControl.clearTask()
 		await this.postStateToWebview()
 	}
@@ -1254,14 +947,16 @@ export class Controller {
 	 * return immediately so the webview stays responsive.
 	 */
 	async askResponse(prompt?: string, images?: string[], files?: string[]): Promise<void> {
-		if (this.pendingClineAuthRetryPrompt !== undefined && this.task?.taskState?.askResponse === "yesButtonClicked") {
-			const retryPrompt = this.pendingClineAuthRetryPrompt
-			this.pendingClineAuthRetryPrompt = undefined
-			await this.initTask(retryPrompt, images, files)
-			return
-		}
-
+		this.bedrockStartup.assertReady()
 		const turnStateBefore = this.turnStateTracker.get()
+		const activeSession = this.sessions.getActiveSession()
+		if (!activeSession?.isRunning) {
+			this.runLifecycle.begin({
+				sessionId: activeSession?.sessionId ?? this.task?.taskId,
+				invocationId: this.bedrockStartup.state.selectedTarget?.invocationId,
+			})
+			void this.postStateToWebview()
+		}
 
 		// Answering an ask / continuing after completion / resuming a cancelled task all kick off a
 		// new agent turn — move the authoritative phase to "streaming" so the footer shows
@@ -1282,6 +977,7 @@ export class Controller {
 		files?: string[]
 		restoreWorkspace?: boolean
 	}): Promise<void> {
+		this.bedrockStartup.assertReady()
 		const editedText = input.text.trim()
 		if (!editedText && (input.images?.length ?? 0) === 0 && (input.files?.length ?? 0) === 0) {
 			throw new Error("Edited message cannot be empty")
@@ -1293,20 +989,20 @@ export class Controller {
 			throw new Error("No active task to edit")
 		}
 
-		const clineMessages = currentTask.messageStateHandler.getClineMessages()
-		const targetIndex = clineMessages.findIndex((message) => message.ts === input.messageTs)
+		const bedrockCoderMessages = currentTask.messageStateHandler.getBedrockCoderMessages()
+		const targetIndex = bedrockCoderMessages.findIndex((message) => message.ts === input.messageTs)
 		if (targetIndex === -1) {
 			throw new Error("Message to edit was not found")
 		}
-		const targetMessage = clineMessages[targetIndex]
+		const targetMessage = bedrockCoderMessages[targetIndex]
 		if (targetMessage.type !== "say" || (targetMessage.say !== "task" && targetMessage.say !== "user_feedback")) {
 			throw new Error("Only user messages can be edited")
 		}
 
-		const userOrdinal = clineMessages
+		const userOrdinal = bedrockCoderMessages
 			.slice(0, targetIndex + 1)
 			.filter((message) => message.type === "say" && (message.say === "task" || message.say === "user_feedback")).length
-		const checkpointRunCount = getCheckpointRunCountForMessage(clineMessages, targetIndex)
+		const checkpointRunCount = getCheckpointRunCountForMessage(bedrockCoderMessages, targetIndex)
 		const sourceSessionId = activeSession?.sessionId ?? currentTask.taskId
 		let sdkMessages: SdkUserMessage[]
 		let tempHost: VscodeSessionHost | undefined
@@ -1327,7 +1023,7 @@ export class Controller {
 			const historyTitle =
 				userOrdinal === 1
 					? editedText
-					: extractSdkUserText(firstUserMessage ?? {}) || clineMessages[0]?.text || editedText
+					: extractSdkUserText(firstUserMessage ?? {}) || bedrockCoderMessages[0]?.text || editedText
 			const fallbackCwd = await this.getWorkspaceRoot()
 			const [sessionRecord, historyItem] = await Promise.all([
 				sessionHost.get(sourceSessionId).catch(() => undefined),
@@ -1340,10 +1036,6 @@ export class Controller {
 				fallbackCwd
 			const mode = this.stateManager.getGlobalSettingsKey("mode") === "plan" ? "plan" : "act"
 			const config = await this.sessionConfigBuilder.build({ cwd, mode, prompt: historyTitle })
-			if (usesClineAccountAuth(config.providerId) && !config.apiKey) {
-				this.emitClineAuthErrorWithTelemetry(editedText)
-				return
-			}
 
 			const resolvedPrompt = await this.resolveContextMentions(editedText)
 			const startInput = {
@@ -1362,6 +1054,15 @@ export class Controller {
 				if (checkpointRunCount === undefined) {
 					throw new Error("Workspace restore is only available for messages that started an agent run")
 				}
+				const approved = await this.approveCheckpointWorkspaceRestore(
+					sessionHost,
+					sourceSessionId,
+					checkpointRunCount,
+					cwd,
+				)
+				if (!approved) {
+					return
+				}
 				await sessionHost.restore({
 					sessionId: sourceSessionId,
 					checkpointRunCount,
@@ -1369,6 +1070,7 @@ export class Controller {
 					restore: {
 						messages: false,
 						workspace: true,
+						workspaceApproved: true,
 						omitCheckpointMessageFromSession: true,
 					},
 				})
@@ -1390,7 +1092,7 @@ export class Controller {
 			const newHistoryItem = createHistoryItemFromSession(startResult.sessionId, historyTitle, config.modelId, cwd)
 			await this.taskHistory.updateTaskHistoryItem(newHistoryItem)
 
-			const visibleMessages = clineMessages.slice(0, targetIndex)
+			const visibleMessages = bedrockCoderMessages.slice(0, targetIndex)
 			if (visibleMessages.length > 0) {
 				task.messageStateHandler.addMessages(visibleMessages)
 			}
@@ -1413,7 +1115,7 @@ export class Controller {
 		}
 	}
 
-	async restoreCheckpoint(input: { checkpointRunCount: number; restoreType: ClineCheckpointRestore }): Promise<void> {
+	async restoreCheckpoint(input: { checkpointRunCount: number; restoreType: BedrockCoderCheckpointRestore }): Promise<void> {
 		const restoreMessages = input.restoreType === "task" || input.restoreType === "taskAndWorkspace"
 		const restoreWorkspace = input.restoreType === "workspace" || input.restoreType === "taskAndWorkspace"
 		const checkpointRunCount = Number(input.checkpointRunCount)
@@ -1426,26 +1128,32 @@ export class Controller {
 		if (!activeSession || !currentTask) {
 			throw new Error("No active task to restore")
 		}
-		if (activeSession.isRunning) {
-			await this.cancelTask()
-		}
-
-		const currentMessages = currentTask.messageStateHandler.getClineMessages()
+		const currentMessages = currentTask.messageStateHandler.getBedrockCoderMessages()
 		const target = restoreMessages ? findVisibleCheckpointUserMessageByRun(currentMessages, checkpointRunCount) : undefined
 		if (restoreMessages && !target) {
 			throw new Error(`Could not find user message for checkpoint run ${checkpointRunCount}`)
 		}
 
 		const cwd = await this.getWorkspaceRoot()
+		if (restoreWorkspace) {
+			const approved = await this.approveCheckpointWorkspaceRestore(
+				activeSession.sdkHost,
+				activeSession.sessionId,
+				checkpointRunCount,
+				cwd,
+			)
+			if (!approved) {
+				return
+			}
+		}
+		if (activeSession.isRunning) {
+			await this.cancelTask()
+		}
 		const mode = this.stateManager.getGlobalSettingsKey("mode") === "plan" ? "plan" : "act"
 		const firstUserMessage = currentMessages.find(isVisibleCheckpointUserMessage)
 		const restoredText = target?.message.text ?? ""
 		const historyTitle = checkpointRunCount === 1 ? restoredText : firstUserMessage?.text || restoredText
 		const config = restoreMessages ? await this.sessionConfigBuilder.build({ cwd, mode, prompt: historyTitle }) : undefined
-		if (config && usesClineAccountAuth(config.providerId) && !config.apiKey) {
-			this.emitClineAuthErrorWithTelemetry(restoredText)
-			return
-		}
 
 		const startInput = config
 			? {
@@ -1464,6 +1172,7 @@ export class Controller {
 			restore: {
 				messages: restoreMessages,
 				workspace: restoreWorkspace,
+				workspaceApproved: restoreWorkspace,
 				omitCheckpointMessageFromSession: true,
 			},
 			...(startInput ? { start: startInput } : {}),
@@ -1506,6 +1215,44 @@ export class Controller {
 		await this.postStateToWebview()
 	}
 
+	private async approveCheckpointWorkspaceRestore(
+		sessionHost: SdkSessionHost,
+		sessionId: string,
+		checkpointRunCount: number,
+		cwd: string,
+	): Promise<boolean> {
+		const session = await sessionHost.get(sessionId)
+		if (!session) {
+			throw new Error(`Session ${sessionId} was not found`)
+		}
+		const comparison = await compareCheckpointToWorkspace({
+			session,
+			checkpointRunCount,
+			cwd,
+		})
+		const unrestorable = comparison.diffs.filter((diff) => !diff.restorable)
+		if (unrestorable.length > 0) {
+			throw new Error(
+				`Checkpoint cannot be restored safely: ${unrestorable.map((diff) => path.basename(diff.filePath)).join(", ")}`,
+			)
+		}
+		const summary = comparison.diffs
+			.slice(0, 20)
+			.map((diff) => `${diff.status}: ${path.relative(cwd, diff.filePath)}`)
+			.join("\n")
+		const omitted = Math.max(0, comparison.diffs.length - 20)
+		const response = await HostProvider.window.showMessage({
+			type: ShowMessageType.WARNING,
+			message: `Restore ${comparison.diffs.length} workspace file${comparison.diffs.length === 1 ? "" : "s"} from checkpoint?`,
+			options: {
+				modal: true,
+				items: ["Restore Workspace"],
+				detail: `${summary || "The workspace already matches this checkpoint."}${omitted ? `\n…and ${omitted} more` : ""}\n\nThe checkpoint will be preserved. No git reset, clean, commit, or push will run.`,
+			},
+		})
+		return response.selectedOption === "Restore Workspace"
+	}
+
 	/**
 	 * Show a task from history by loading its messages.
 	 * This does NOT start inference — it just loads the task for viewing.
@@ -1514,7 +1261,7 @@ export class Controller {
 	 * this.task = undefined and may trigger async operations (session stop/dispose)
 	 * that race with the new task proxy creation. If any of those async operations
 	 * trigger postStateToWebview() while this.task is undefined, the webview
-	 * receives a state with no currentTaskItem/clineMessages and flashes back
+	 * receives a state with no currentTaskItem/bedrockCoderMessages and flashes back
 	 * to the welcome screen (S6-6/S6-23 fix).
 	 *
 	 * Instead, we:
@@ -1534,85 +1281,8 @@ export class Controller {
 
 	// ---- Mode switching ----
 
-	async toggleActModeForYoloMode(): Promise<boolean> {
-		return this.mode.toggleActModeForYoloMode()
-	}
-
 	async togglePlanActMode(modeToSwitchTo: Mode, chatContent?: ChatContent): Promise<boolean> {
 		return this.mode.togglePlanActMode(modeToSwitchTo, chatContent)
-	}
-
-	// ---- Telemetry ----
-
-	async updateTelemetrySetting(telemetrySetting: TelemetrySetting): Promise<void> {
-		setTelemetryOptOutGlobally(telemetrySetting === "disabled", { telemetry: this.sdkTelemetry.telemetry })
-		// Mirror to StateManager for existing VS Code services during the transition.
-		this.stateManager.setGlobalState("telemetrySetting", telemetrySetting)
-		await this.postStateToWebview()
-	}
-
-	// ---- Auth callbacks ----
-
-	async handleSignOut(): Promise<void> {
-		await this.authService.handleDeauth(LogoutReason.USER_INITIATED)
-		clearRemoteConfig()
-		await this.setRemoteConfigCoreIntegration(undefined)
-		await this.postStateToWebview()
-	}
-
-	async handleOcaSignOut(): Promise<void> {
-		await this.ocaAuthService.handleDeauth(LogoutReason.USER_INITIATED)
-		await this.postStateToWebview()
-	}
-
-	async handleAuthCallback(customToken: string, provider: string | null = null): Promise<void> {
-		await this.authService.handleAuthCallback(customToken, provider ?? "cline")
-		// Fetch remote config immediately after login so enterprise policies
-		// (provider lockdown, MCP servers, OTel, etc.) are applied right away.
-		await this.refreshRemoteConfig()
-		await this.postStateToWebview()
-	}
-
-	async handleOcaAuthCallback(code: string, state: string): Promise<void> {
-		await this.ocaAuthService.handleAuthCallback(code, state)
-		await this.postStateToWebview()
-	}
-
-	// ---- Provider auth callbacks ----
-
-	private persistProviderApiKeyFromState(provider: string): void {
-		const providerId = parseProviderId(provider)
-		const apiKey = this.providerConfigStore.read(providerId).apiKey
-
-		if (!apiKey) {
-			Logger.warn(`[SdkController] No API key found after ${provider} auth callback`)
-			return
-		}
-
-		this.providerConfigStore.write(providerId, { apiKey })
-	}
-
-	async handleOpenRouterCallback(code: string): Promise<void> {
-		await this.authService.handleOpenRouterCallback(code)
-		this.persistProviderApiKeyFromState("openrouter")
-		await this.postStateToWebview()
-	}
-
-	async handleRequestyCallback(code: string): Promise<void> {
-		await this.authService.handleRequestyCallback(code)
-		this.persistProviderApiKeyFromState("requesty")
-		await this.postStateToWebview()
-	}
-
-	async handleHicapCallback(code: string): Promise<void> {
-		await this.authService.handleHicapCallback(code)
-		this.persistProviderApiKeyFromState("hicap")
-		await this.postStateToWebview()
-	}
-
-	async readOpenRouterModels(): Promise<Record<string, ModelInfo> | undefined> {
-		stubWarn("readOpenRouterModels")
-		return undefined
 	}
 
 	async getTaskHistory(request: GetTaskHistoryRequest): Promise<TaskHistoryArray> {
@@ -1701,15 +1371,13 @@ export class Controller {
 				cacheWrites: metadataNumber(metadata, "cacheWrites") ?? 0,
 				cacheReads: metadataNumber(metadata, "cacheReads") ?? 0,
 				modelId: item.model || metadataString(metadata, "modelId") || "",
-				isLegacy:
-					metadataBoolean(metadata, "legacyTask") === true ||
-					metadataBoolean(metadata, "migratedFromLegacyTask") === true,
+				isLegacy: false,
 			}
 		})
 
 		if (offset === 0 && !favoritesOnly && this.task?.taskId && !tasks.some((task) => task.id === this.task?.taskId)) {
 			const taskMessage = this.task.messageStateHandler
-				.getClineMessages()
+				.getBedrockCoderMessages()
 				.find((message) => message.type === "say" && message.say === "task" && message.text)
 			const matchesSearch = !searchQuery || taskMessage?.text?.toLowerCase().includes(searchQuery.toLowerCase())
 			if (taskMessage?.text && matchesSearch) {
@@ -1739,9 +1407,7 @@ export class Controller {
 			throw new Error(`Task not found in history: ${id}`)
 		}
 
-		const taskDirPath = historyItem.messagesPath
-			? path.dirname(historyItem.messagesPath)
-			: this.taskHistory.getLegacyTaskDirPath(id)
+		const taskDirPath = historyItem.messagesPath ? path.dirname(historyItem.messagesPath) : undefined
 		if (!taskDirPath) {
 			throw new Error(`Task history item has no artifact path: ${id}`)
 		}
@@ -1884,7 +1550,6 @@ export class Controller {
 		// Build the base ExtensionState from StateManager, then layer the SDK's
 		// task history on top.
 		try {
-			syncTelemetrySettingFromSharedGlobalSettings(this.stateManager)
 			const { getStateToPostToWebview: buildBaseState } = await import("@core/controller/state/getStateToPostToWebview")
 			const state = await buildBaseState({
 				task: this.task,
@@ -1898,28 +1563,21 @@ export class Controller {
 				.map(sessionHistoryRecordToHistoryItem)
 				.filter((item) => item.ts && item.task)
 				.sort((a, b) => b.ts - a.ts)
-			const legacyTaskHistory = state.taskHistory ?? []
-			const mergedTaskHistoryById = new Map<string, HistoryItem>()
-
-			// Keep the SDK records authoritative for migrated/new tasks, but append
-			// legacy persisted history so pre-migration tasks still appear in the UI.
-			for (const item of legacyTaskHistory) {
-				mergedTaskHistoryById.set(item.id, item)
-			}
+			const taskHistoryById = new Map<string, HistoryItem>()
 			for (const item of sdkTaskHistory) {
-				mergedTaskHistoryById.set(item.id, item)
+				taskHistoryById.set(item.id, item)
 			}
 
 			// A just-started task may not be visible in SDK persisted history yet (the
 			// history adapter can lag behind the active in-memory TaskProxy). Classic
 			// state included the current task immediately, and the testing platform
 			// asserts that taskHistory reflects newTask before the model turn completes.
-			if (this.task?.taskId && !mergedTaskHistoryById.has(this.task.taskId)) {
+			if (this.task?.taskId && !taskHistoryById.has(this.task.taskId)) {
 				const taskMessage = this.task.messageStateHandler
-					.getClineMessages()
+					.getBedrockCoderMessages()
 					.find((message) => message.type === "say" && message.say === "task" && message.text)
 				if (taskMessage?.text) {
-					mergedTaskHistoryById.set(this.task.taskId, {
+					taskHistoryById.set(this.task.taskId, {
 						id: this.task.taskId,
 						ts: taskMessage.ts || Date.now(),
 						task: taskMessage.text,
@@ -1934,7 +1592,7 @@ export class Controller {
 				}
 			}
 
-			const processedTaskHistory = Array.from(mergedTaskHistoryById.values())
+			const processedTaskHistory = Array.from(taskHistoryById.values())
 				.filter((item) => item.ts && item.task)
 				.sort((a, b) => b.ts - a.ts)
 				.slice(0, 100)
@@ -1956,11 +1614,13 @@ export class Controller {
 			const minter = this.messageTranslatorState.getMinter()
 			return {
 				...state,
+				bedrockStartup: this.bedrockStartup.state,
 				currentTaskItem: this.task?.taskId
 					? processedTaskHistory.find((item) => item.id === this.task?.taskId)
 					: undefined,
 				taskHistory: processedTaskHistory,
 				turnState: this.turnStateTracker.get(),
+				runState: this.runLifecycle.get(),
 				queuedPrompts,
 				stateVersion: minter.nextSeq(),
 				epoch: minter.epoch,
@@ -1969,6 +1629,10 @@ export class Controller {
 			Logger.error("[SdkController] Failed to get state for webview:", error)
 			throw error
 		}
+	}
+
+	getToolResult(id: string): StoredToolResult | undefined {
+		return this.toolResults.get(id)
 	}
 
 	// ---- Terminal settings ----

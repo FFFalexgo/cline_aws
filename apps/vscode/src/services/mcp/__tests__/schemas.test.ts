@@ -6,13 +6,13 @@ import { McpSettingsSchema, ServerConfigSchema } from "../schemas"
  * Unit tests for MCP settings schema parsing.
  *
  * Covers three formats:
- *  1. "Nested transport" format written by the Cline CLI (`cline mcp add`)
+ *  1. "Nested transport" format written by the BedrockCoder CLI (`bedrockCoder mcp add`)
  *  2. "Flat" legacy format accepted by the VSCode extension before this change
  *  3. Invalid configs that must still be rejected
  */
 describe("McpSettingsSchema", () => {
 	// -------------------------------------------------------------------------
-	// Nested transport format (written by the Cline CLI)
+	// Nested transport format (written by the BedrockCoder CLI)
 	// -------------------------------------------------------------------------
 
 	describe("nested transport format (CLI-authored)", () => {
@@ -101,7 +101,7 @@ describe("McpSettingsSchema", () => {
 		})
 
 		it("preserves metadata field from CLI-authored nested format", () => {
-			const metadata = { addedBy: "cline-cli", version: "1.2.3" }
+			const metadata = { addedBy: "bedrock-coder-cli", version: "1.2.3" }
 			const input = {
 				mcpServers: {
 					myServer: {
@@ -116,12 +116,11 @@ describe("McpSettingsSchema", () => {
 			;(result.data!.mcpServers["myServer"] as any).metadata.should.deepEqual(metadata)
 		})
 
-		it("preserves autoApprove and timeout alongside nested transport", () => {
+		it("preserves timeout alongside nested transport", () => {
 			const input = {
 				mcpServers: {
 					myServer: {
 						transport: { type: "streamableHttp", url: "https://mcp.example.com/mcp" },
-						autoApprove: ["my_tool"],
 						timeout: 120,
 					},
 				},
@@ -131,7 +130,6 @@ describe("McpSettingsSchema", () => {
 			result.success.should.be.true()
 
 			const server = result.data!.mcpServers["myServer"]
-			server.autoApprove!.should.deepEqual(["my_tool"])
 			server.timeout.should.equal(120)
 		})
 
@@ -169,7 +167,6 @@ describe("McpSettingsSchema", () => {
 					myServer: {
 						type: "streamableHttp",
 						url: "https://mcp.example.com/mcp",
-						autoApprove: [],
 						timeout: 60,
 					},
 				},
@@ -242,7 +239,6 @@ describe("McpSettingsSchema", () => {
 					extensionServer: {
 						command: "node",
 						args: ["server.js"],
-						autoApprove: ["tool1"],
 					},
 				},
 			}

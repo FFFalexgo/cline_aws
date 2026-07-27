@@ -25,39 +25,14 @@ tsConfigPaths.register({
 	paths: outPaths,
 })
 
-// Mock the @google/genai module to avoid ESM compatibility issues in tests
-// The module is ES6 only, but the integration tests are compiled to commonJS.
 const originalRequire = Module.prototype.require
 Module.prototype.require = function (id) {
-	// Intercept requires for @google/genai
-	if (id === "@google/genai") {
-		// Return the mock instead
-		const mockPath = path.join(baseUrl, "out/src/test/fixtures/google-genai-mock.js")
-		return originalRequire.call(this, mockPath)
-	}
-
 	// The SDK packages are ESM-only and expose only an `import` condition.
 	// Integration tests run the tsc-built `out/` tree as CommonJS in VS Code's
-	// extension host, so `require("@cline/core")` fails before tests start.
+	// extension host, so `require("@bedrock-coder/core")` fails before tests start.
 	// Mock the small surface needed by legacy VS Code integration tests.
-	if (id === "@cline/core") {
-		const createNoopTelemetry = () => ({
-			setDistinctId() {},
-			setMetadata() {},
-			updateMetadata() {},
-			setCommonProperties() {},
-			updateCommonProperties() {},
-			isEnabled: () => false,
-			capture() {},
-			captureRequired() {},
-			recordCounter() {},
-			recordHistogram() {},
-			recordGauge() {},
-			flush: async () => {},
-			dispose: async () => {},
-		})
-
-		class ProviderSettingsManager {
+	if (id === "@bedrock-coder/core") {
+		class BedrockSettingsStore {
 			constructor(_options) {
 				this.state = { providers: {}, lastUsedProvider: undefined }
 			}
@@ -66,69 +41,15 @@ Module.prototype.require = function (id) {
 				return this.state
 			}
 
-			getLastUsedProviderSettings() {
+			getSettings() {
 				return undefined
 			}
 
-			getProviderSettings(_provider) {
-				return undefined
-			}
-
-			saveProviderSettings(_settings, _options) {}
+			save(_settings) {}
 		}
-
-		const getProviderAuthStorageId = (providerId) => {
-			const normalized = String(providerId || "")
-				.trim()
-				.toLowerCase()
-			if (normalized === "cline" || normalized === "cline-pass") return "cline"
-			if (normalized === "oca" || normalized === "openai-codex") return normalized
-			return undefined
-		}
-		const formatClineApiKey = (token) => {
-			const trimmed = String(token || "").trim()
-			return trimmed.toLowerCase().startsWith("workos:") ? trimmed : `workos:${trimmed}`
-		}
-		const getProviderAuthHandler = (providerId) => {
-			const storageProviderId = getProviderAuthStorageId(providerId)
-			if (!storageProviderId) return undefined
-			return {
-				providerId,
-				storageProviderId,
-				getApiKey(settings) {
-					const accessToken = settings?.auth?.accessToken?.trim?.()
-					if (accessToken) return storageProviderId === "cline" ? formatClineApiKey(accessToken) : accessToken
-					return settings?.apiKey?.trim?.() || settings?.auth?.apiKey?.trim?.() || undefined
-				},
-			}
-		}
-		const resolveProviderApiKeyFromSettings = (manager, providerId) => {
-			const handler = getProviderAuthHandler(providerId)
-			const storageProviderId = handler?.storageProviderId ?? providerId
-			const settings = manager.getProviderSettings(storageProviderId)
-			return handler?.getApiKey(settings) ?? settings?.apiKey?.trim?.()
-		}
-		const listLocalProviders = async (manager) => ({ providers: [], settingsPath: manager.getFilePath?.() ?? "" })
 
 		return {
-			createClineTelemetryServiceConfig: (config = {}) => ({
-				enabled: false,
-				metadata: {
-					extension_version: "test",
-					cline_type: "test",
-					platform: "test",
-					platform_version: "test",
-					os_type: "test",
-					os_version: "test",
-				},
-				...config,
-			}),
-			createConfiguredTelemetryHandle: () => ({
-				telemetry: createNoopTelemetry(),
-				flush: async () => {},
-				dispose: async () => {},
-			}),
-			ClineCore: class {
+			BedrockCoderCore: class {
 				constructor() {
 					this.runtimeAddress = undefined
 					this.pendingPrompts = {
@@ -181,47 +102,32 @@ Module.prototype.require = function (id) {
 					return () => {}
 				}
 			},
-			ProviderSettingsManager,
-			listLocalProviders,
-			resolveProviderConfig: async () => undefined,
-			getProviderConfigFields: () => [],
-			fetchClineRecommendedModels: async () => ({ recommended: [], free: [] }),
-			readGlobalSettings: () => ({ telemetryOptOut: false }),
-			setTelemetryOptOutGlobally: () => undefined,
-			prepareRemoteConfigCoreIntegration: () => undefined,
+			BedrockSettingsStore,
+			readGlobalSettings: () => ({}),
 			createDefaultExecutors: () => ({}),
 			createMcpTools: () => ({}),
 			createOAuthClientCallbacks: () => ({}),
-			getProviderAuthHandler,
-			getProviderAuthStorageId,
-			resolveProviderApiKeyFromSettings,
-			getValidClineCredentials: async () => undefined,
-			loginClineOAuth: async () => undefined,
-			loginOcaOAuth: async () => undefined,
-			loginOpenAICodex: async () => undefined,
 		}
 	}
 
-	if (id === "@cline/shared") {
+	if (id === "@bedrock-coder/shared") {
 		return {
-			buildClineSystemPrompt: () => "",
+			buildBedrockCoderSystemPrompt: () => "",
 			createTool: (tool) => tool,
 			formatDisplayUserInput: (input) => (typeof input === "string" ? input : JSON.stringify(input)),
 		}
 	}
 
-	if (id === "@cline/shared/storage") {
+	if (id === "@bedrock-coder/shared/storage") {
 		return {
 			resolveGlobalSettingsPath: () => path.join(baseUrl, ".vscode-test", "shared-global-settings.json"),
 		}
 	}
 
-	if (id === "@cline/llms") {
+	if (id === "@bedrock-coder/llms") {
 		return {
-			getAllProviders: async () => [],
-			getGeneratedModelsForProvider: () => ({}),
-			getProviderCollectionSync: () => undefined,
-			MODEL_COLLECTIONS_BY_PROVIDER_ID: {},
+			BUILT_IN_PROVIDER: "bedrock",
+			BUILT_IN_PROVIDER_IDS: ["bedrock"],
 		}
 	}
 

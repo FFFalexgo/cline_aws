@@ -8,8 +8,8 @@ import {
 	type AgentTool,
 	createContributionRegistry,
 	type Message,
-} from "@cline/shared";
-import { setHomeDir } from "@cline/shared/storage";
+} from "@bedrock-coder/shared";
+import { setHomeDir } from "@bedrock-coder/shared/storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UserInstructionConfigService } from "../../extensions/config";
 import type { CoreSessionConfig } from "../../types/config";
@@ -58,9 +58,8 @@ function makeBaseConfig(
 	overrides: Partial<CoreSessionConfig> = {},
 ): CoreSessionConfig {
 	return {
-		providerId: "anthropic",
+		providerId: "bedrock",
 		modelId: "claude-sonnet-4-6",
-		apiKey: "key",
 		systemPrompt: "test",
 		cwd: process.cwd(),
 		enableTools: true,
@@ -109,16 +108,16 @@ describe("DefaultRuntimeBuilder configured agent execution", () => {
 
 	it("invokes configured agents with host callbacks, scoped tools, skills, overrides, and parent context", async () => {
 		const { DefaultRuntimeBuilder } = await import("./runtime-builder");
-		const tempHome = mkdtempSync(join(tmpdir(), "cline-agent-home-"));
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "cline-agent-root-"));
+		const tempHome = mkdtempSync(join(tmpdir(), "bedrock-coder-agent-home-"));
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "bedrock-coder-agent-root-"));
 		const cwd = join(workspaceRoot, "packages", "app");
 		tempDirs.push(tempHome, workspaceRoot);
 		process.env.HOME = tempHome;
 		setHomeDir(tempHome);
 		mkdirSync(cwd, { recursive: true });
 
-		const agentsDir = join(workspaceRoot, ".cline", "agents");
-		const skillDir = join(workspaceRoot, ".cline", "skills", "commit");
+		const agentsDir = join(workspaceRoot, ".bedrock-coder", "agents");
+		const skillDir = join(workspaceRoot, ".bedrock-coder", "skills", "commit");
 		mkdirSync(agentsDir, { recursive: true });
 		mkdirSync(skillDir, { recursive: true });
 		writeFileSync(
@@ -128,8 +127,9 @@ name: reviewer
 description: Reviews code
 tools: Execute_Command, Read_File, Use_Skill
 skills: commit
+# Deliberately invalid: configured child agents must inherit the Bedrock provider.
 providerId: openai
-modelId: gpt-4.1
+modelId: anthropic.claude-haiku-4-5-20251001-v1:0
 maxIterations: 3
 ---
 You are a reviewer.`,
@@ -150,7 +150,7 @@ Write a concise commit message.`,
 		const onSubAgentStart = vi.fn();
 		const onSubAgentEnd = vi.fn();
 		const effectiveToolPolicies = {
-			"*": { autoApprove: false },
+			"*": {},
 			read_files: { enabled: false },
 		};
 		const runtime = await new DefaultRuntimeBuilder().build({
@@ -222,8 +222,8 @@ Write a concise commit message.`,
 			| undefined;
 		expect(delegatedConfig).toEqual(
 			expect.objectContaining({
-				providerId: "openai",
-				modelId: "gpt-4.1",
+				providerId: "bedrock",
+				modelId: "anthropic.claude-haiku-4-5-20251001-v1:0",
 				maxIterations: 3,
 				parentAgentId: "parent-agent",
 				requestToolApproval,
@@ -260,9 +260,9 @@ Write a concise commit message.`,
 
 	it("does not require custom user instruction services to implement createSkillsExecutor", async () => {
 		const { DefaultRuntimeBuilder } = await import("./runtime-builder");
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "cline-agent-compat-"));
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "bedrock-coder-agent-compat-"));
 		tempDirs.push(workspaceRoot);
-		const agentsDir = join(workspaceRoot, ".cline", "agents");
+		const agentsDir = join(workspaceRoot, ".bedrock-coder", "agents");
 		mkdirSync(agentsDir, { recursive: true });
 		writeFileSync(
 			join(agentsDir, "reviewer.yml"),

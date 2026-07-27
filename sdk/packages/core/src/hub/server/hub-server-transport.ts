@@ -4,11 +4,8 @@ import type {
 	HubEventEnvelope,
 	HubReplyEnvelope,
 	ToolApprovalRequest,
-} from "@cline/shared";
-import { captureSdkError, createSessionId } from "@cline/shared";
-import { CronService } from "../../cron/service/cron-service";
-import { HubScheduleCommandService } from "../../cron/service/schedule-command-service";
-import { HubScheduleService } from "../../cron/service/schedule-service";
+} from "@bedrock-coder/shared";
+import { createSessionId } from "@bedrock-coder/shared";
 import { LocalRuntimeHost } from "../../runtime/host/local-runtime-host";
 import type {
 	PendingPromptsRuntimeService,
@@ -41,7 +38,6 @@ import {
 	handleClientUnregister,
 	handleClientUpdate,
 } from "./handlers/client-handlers";
-import { handleConnectorCommand } from "./handlers/connector-handlers";
 import {
 	buildHubEvent,
 	type HubTransportContext,
@@ -72,7 +68,6 @@ import {
 	handleSessionUpdateConnection,
 	handleSessionUpdatePendingPrompt,
 } from "./handlers/session-handlers";
-import { eventNameForScheduleCommand } from "./hub-schedule-events";
 import { logHubBoundaryError } from "./hub-server-logging";
 import type { HubWebSocketServerOptions } from "./hub-server-options";
 import type { HubSessionState } from "./hub-session-records";
@@ -174,10 +169,7 @@ export class HubServerTransport implements NativeHubTransport {
 		string,
 		string
 	>();
-	private readonly schedules: HubScheduleService;
-	private readonly scheduleCommands: HubScheduleCommandService;
 	private readonly settings: CoreSettingsService;
-	private readonly cronService?: CronService;
 	private readonly sessionHost: RuntimeHost &
 		Partial<PendingPromptsRuntimeService>;
 	private readonly hubId = createSessionId("hub_");
@@ -188,9 +180,7 @@ export class HubServerTransport implements NativeHubTransport {
 			options.sessionHost ??
 			new LocalRuntimeHost({
 				sessionService: new CoreSessionService(new SqliteSessionStore()),
-				fetch: options.fetch,
 				logger: options.logger,
-				telemetry: options.telemetry,
 			});
 		this.ctx = {
 			clients: this.clients,
@@ -199,7 +189,6 @@ export class HubServerTransport implements NativeHubTransport {
 			pendingCapabilityRequests: this.pendingCapabilityRequests,
 			suppressNextTerminalEventBySession:
 				this.suppressNextTerminalEventBySession,
-			telemetry: options.telemetry,
 			sessionHost: this.sessionHost,
 			publish: (event) => this.publish(event),
 			buildEvent: buildHubEvent,
@@ -219,73 +208,19 @@ export class HubServerTransport implements NativeHubTransport {
 					onProgress,
 				),
 		};
-		this.schedules = new HubScheduleService({
-			...options.scheduleOptions,
-			runtimeHandlers: options.runtimeHandlers,
-			eventPublisher: (eventType, payload) => {
-				const mapped =
-					eventType === "schedule.execution.completed"
-						? "schedule.execution_completed"
-						: eventType === "schedule.execution.failed"
-							? "schedule.execution_failed"
-							: undefined;
-				if (!mapped) {
-					return;
-				}
-				this.publish(
-					buildHubEvent(
-						mapped,
-						payload && typeof payload === "object"
-							? (payload as Record<string, unknown>)
-							: undefined,
-					),
-				);
-			},
-		});
-		this.scheduleCommands = new HubScheduleCommandService(this.schedules);
 		this.settings = options.settingsService ?? new CoreSettingsService();
-		if (options.cronOptions) {
-			this.cronService = new CronService({
-				runtimeHandlers: options.runtimeHandlers,
-				...options.cronOptions,
-			});
-		}
 		this.sessionHost.subscribe((event: CoreSessionEvent) => {
 			void projectSessionEvent(this.ctx, event).catch((error) => {
 				logHubBoundaryError("session event handling failed", error);
-				captureSdkError(this.options.telemetry, {
-					component: "core",
-					operation: "hub.session_event_project",
-					error,
-					severity: "error",
-					handled: true,
-					context: {
-						eventType: event.type,
-						sessionId: event.payload.sessionId,
-					},
-				});
 			});
 		});
-	}
-
-	getCronService(): CronService | undefined {
-		return this.cronService;
 	}
 
 	getHubId(): string {
 		return this.hubId;
 	}
 
-	async start(): Promise<void> {
-		await this.schedules.start();
-		if (this.cronService) {
-			try {
-				await this.cronService.start();
-			} catch (err) {
-				console.error("[hub] cron service start failed", err);
-			}
-		}
-	}
+	async start(): Promise<void> {}
 
 	async stop(): Promise<void> {
 		for (const approvalId of this.pendingApprovals.keys()) {
@@ -300,30 +235,13 @@ export class HubServerTransport implements NativeHubTransport {
 			"Hub shutting down before capability request was resolved.",
 		);
 		await this.sessionHost.dispose("hub_server_stop");
-		await this.schedules.dispose();
-		if (this.cronService) {
-			try {
-				await this.cronService.dispose();
-			} catch (err) {
-				console.error("[hub] cron service stop failed", err);
-			}
-		}
 	}
 
 	async handleCommand(envelope: HubCommandEnvelope): Promise<HubReplyEnvelope> {
 		try {
 			const reply = await this.dispatchCommand(envelope);
-			this.captureFailedReply(envelope, reply);
 			return reply;
 		} catch (error) {
-			captureSdkError(this.options.telemetry, {
-				component: "core",
-				operation: "hub.command",
-				error,
-				severity: "error",
-				handled: false,
-				context: this.commandTelemetryContext(envelope),
-			});
 			throw error;
 		}
 	}
@@ -408,10 +326,6 @@ export class HubServerTransport implements NativeHubTransport {
 				return await this.handleSettingsList(envelope);
 			case "settings.toggle":
 				return await this.handleSettingsToggle(envelope);
-			case "connector.channels":
-			case "connector.configure":
-			case "connector.delete_config":
-				return await handleConnectorCommand(this.ctx, envelope);
 			case "settings.get":
 			case "settings.patch":
 				return {
@@ -423,53 +337,17 @@ export class HubServerTransport implements NativeHubTransport {
 						message: `${envelope.command} is not implemented yet.`,
 					},
 				};
-			default: {
-				const reply = await this.scheduleCommands.handleCommand(envelope);
-				if (reply.ok) {
-					const event = eventNameForScheduleCommand(envelope.command);
-					if (event) {
-						this.publish(buildHubEvent(event, reply.payload));
-					}
-				}
-				return reply;
-			}
+			default:
+				return {
+					version: envelope.version,
+					requestId: envelope.requestId,
+					ok: false,
+					error: {
+						code: "unknown_command",
+						message: `Unknown hub command: ${envelope.command}`,
+					},
+				};
 		}
-	}
-
-	private captureFailedReply(
-		envelope: HubCommandEnvelope,
-		reply: HubReplyEnvelope,
-	): void {
-		if (
-			reply.ok ||
-			!reply.error ||
-			!shouldCaptureHubReplyError(reply.error.code)
-		) {
-			return;
-		}
-		captureSdkError(this.options.telemetry, {
-			component: "core",
-			operation: "hub.command_reply",
-			error: new Error(reply.error.message),
-			severity: reply.error.code === "session_not_found" ? "warn" : "error",
-			handled: true,
-			context: {
-				...this.commandTelemetryContext(envelope),
-				errorCode: reply.error.code,
-			},
-		});
-	}
-
-	private commandTelemetryContext(envelope: HubCommandEnvelope) {
-		return {
-			command: envelope.command,
-			requestId: envelope.requestId,
-			clientId: envelope.clientId,
-			sessionId:
-				typeof envelope.payload?.sessionId === "string"
-					? envelope.payload.sessionId
-					: envelope.sessionId,
-		};
 	}
 
 	private async handleSettingsList(
@@ -584,28 +462,8 @@ export class HubServerTransport implements NativeHubTransport {
 						`listener threw while publishing ${event.event}`,
 						error,
 					);
-					captureSdkError(this.options.telemetry, {
-						component: "core",
-						operation: "hub.publish",
-						error,
-						severity: "warn",
-						handled: true,
-						context: {
-							event: event.event,
-							sessionId: event.sessionId,
-						},
-					});
 				}
 			}
 		}
 	}
-}
-
-function shouldCaptureHubReplyError(code: string): boolean {
-	return (
-		code === "session_not_found" ||
-		code === "session_messages_not_found" ||
-		code === "hub_command_timeout" ||
-		code.endsWith("_failed")
-	);
 }

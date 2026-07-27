@@ -1,7 +1,7 @@
 import { mentionRegex, mentionRegexGlobal } from "@shared/context-mentions"
-import { StringRequest } from "@shared/proto/cline/common"
-import { FileSearchRequest, FileSearchType, RelativePathsRequest } from "@shared/proto/cline/file"
-import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/cline/state"
+import { StringRequest } from "@shared/proto/bedrock_coder/common"
+import { FileSearchRequest, FileSearchType, RelativePathsRequest } from "@shared/proto/bedrock_coder/file"
+import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/bedrock_coder/state"
 import { type SlashCommand } from "@shared/slashCommands"
 import { Mode } from "@shared/storage/types"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
@@ -14,7 +14,6 @@ import ContextMenu from "@/components/chat/ContextMenu"
 import { CHAT_CONSTANTS } from "@/components/chat/chat-view/constants"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu"
 import Thumbnails from "@/components/common/Thumbnails"
-import { getModeSpecificFields } from "@/components/settings/utils/providerUtils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { usePlatform } from "@/context/PlatformContext"
@@ -42,7 +41,7 @@ import {
 	slashCommandRegexGlobal,
 	validateSlashCommand,
 } from "@/utils/slash-commands"
-import ClineRulesToggleModal from "../cline-rules/ClineRulesToggleModal"
+import BedrockCoderRulesToggleModal from "../bedrock-coder-rules/BedrockCoderRulesToggleModal"
 import ServersToggleModal from "./ServersToggleModal"
 
 const { MAX_IMAGES_AND_FILES_PER_MESSAGE } = CHAT_CONSTANTS
@@ -216,12 +215,9 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const {
 			mode,
 			apiConfiguration,
-			openRouterModels,
 			platform,
 			localWorkflowToggles,
 			globalWorkflowToggles,
-			remoteWorkflowToggles,
-			remoteConfigSettings,
 			navigateToSettingsModelPicker,
 			mcpServers,
 		} = useExtensionState()
@@ -486,8 +482,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								slashCommandsQuery,
 								localWorkflowToggles,
 								globalWorkflowToggles,
-								remoteWorkflowToggles,
-								remoteConfigSettings?.remoteGlobalWorkflows,
 								mcpServers,
 							)
 
@@ -511,8 +505,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							slashCommandsQuery,
 							localWorkflowToggles,
 							globalWorkflowToggles,
-							remoteWorkflowToggles,
-							remoteConfigSettings?.remoteGlobalWorkflows,
 							mcpServers,
 						)
 						if (commands.length > 0) {
@@ -978,13 +970,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 				// Extract just the command name (without the slash)
 				const commandName = command.substring(1)
-				const isValidCommand = validateSlashCommand(
-					commandName,
-					localWorkflowToggles,
-					globalWorkflowToggles,
-					remoteWorkflowToggles,
-					remoteConfigSettings?.remoteGlobalWorkflows,
-				)
+				const isValidCommand = validateSlashCommand(commandName, localWorkflowToggles, globalWorkflowToggles)
 
 				if (isValidCommand) {
 					hasHighlightedSlashCommand = true
@@ -997,7 +983,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			highlightLayerRef.current.innerHTML = processedText
 			highlightLayerRef.current.scrollTop = textAreaRef.current.scrollTop
 			highlightLayerRef.current.scrollLeft = textAreaRef.current.scrollLeft
-		}, [localWorkflowToggles, globalWorkflowToggles, remoteWorkflowToggles, remoteConfigSettings])
+		}, [localWorkflowToggles, globalWorkflowToggles])
 
 		useLayoutEffect(() => {
 			updateHighlights()
@@ -1101,50 +1087,10 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 		// Get model display name
 		const modelDisplayName = useMemo(() => {
-			const {
-				vsCodeLmModelSelector,
-				togetherModelId,
-				lmStudioModelId,
-				ollamaModelId,
-				liteLlmModelId,
-				requestyModelId,
-				vercelAiGatewayModelId,
-			} = getModeSpecificFields(apiConfiguration, mode)
-			const unknownModel = "unknown"
-
 			if (!apiConfiguration) {
-				return unknownModel
+				return "bedrock:unknown"
 			}
-			switch (selectedProvider) {
-				case "cline":
-					return `${selectedProvider}:${selectedModelId}`
-				case "cline-pass":
-					// Free models selected on ClinePass go through Cline usage billing,
-					// so label them the same way as the cline provider
-					return selectedModelId.startsWith("cline-pass/")
-						? `${selectedProvider}:${selectedModelId.replace(/^cline-pass\//, "")}`
-						: `cline:${selectedModelId}`
-				case "openai":
-					return `openai-compat:${selectedModelId}`
-				case "vscode-lm":
-					return `vscode-lm:${vsCodeLmModelSelector ? `${vsCodeLmModelSelector.vendor ?? ""}/${vsCodeLmModelSelector.family ?? ""}` : unknownModel}`
-				case "together":
-					return `${selectedProvider}:${togetherModelId}`
-				case "lmstudio":
-					return `${selectedProvider}:${lmStudioModelId}`
-				case "ollama":
-					return `${selectedProvider}:${ollamaModelId}`
-				case "litellm":
-					return `${selectedProvider}:${liteLlmModelId}`
-				case "requesty":
-					return `${selectedProvider}:${requestyModelId}`
-				case "vercel-ai-gateway":
-					return `${selectedProvider}:${vercelAiGatewayModelId || selectedModelId}`
-				case "anthropic":
-				case "openrouter":
-				default:
-					return `${selectedProvider}:${selectedModelId}`
-			}
+			return `${selectedProvider}:${selectedModelId}`
 		}, [apiConfiguration, mode, selectedProvider, selectedModelId])
 
 		// Function to show error message for unsupported files for drag and drop
@@ -1407,8 +1353,6 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								onMouseDown={handleMenuMouseDown}
 								onSelect={handleSlashCommandsSelect}
 								query={slashCommandsQuery}
-								remoteWorkflows={remoteConfigSettings?.remoteGlobalWorkflows}
-								remoteWorkflowToggles={remoteWorkflowToggles}
 								selectedIndex={selectedSlashCommandsIndex}
 								setSelectedIndex={setSelectedSlashCommandsIndex}
 							/>
@@ -1611,7 +1555,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 							<ServersToggleModal />
 
-							<ClineRulesToggleModal />
+							<BedrockCoderRulesToggleModal />
 
 							<ModelContainer>
 								<ModelButtonWrapper>
@@ -1633,7 +1577,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							className="text-xs px-2 flex flex-col gap-1"
 							hidden={shownTooltipMode === null}
 							side="top">
-							{`In ${shownTooltipMode === "act" ? "Act" : "Plan"}  mode, Cline will ${shownTooltipMode === "act" ? "complete the task immediately" : "gather information to architect a plan"}`}
+							{`In ${shownTooltipMode === "act" ? "Act" : "Plan"}  mode, BedrockCoder will ${shownTooltipMode === "act" ? "complete the task immediately" : "gather information to architect a plan"}`}
 							<p className="text-description/80 text-xs mb-0">
 								Toggle w/ <kbd className="text-muted-foreground mx-1">{togglePlanActKeys}</kbd>
 							</p>

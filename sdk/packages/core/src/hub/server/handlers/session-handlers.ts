@@ -3,8 +3,8 @@ import type {
 	HubReplyEnvelope,
 	JsonValue,
 	ToolApprovalRequest,
-} from "@cline/shared";
-import { createSessionId, parseRuntimeConfigExtensions } from "@cline/shared";
+} from "@bedrock-coder/shared";
+import { createSessionId, parseRuntimeConfigExtensions } from "@bedrock-coder/shared";
 import { normalizeConnectionUpdate } from "../../../runtime/config/connection-update";
 import type {
 	RuntimeSessionConfig,
@@ -62,17 +62,8 @@ export function readSessionConnectionUpdate(
 ): SessionConnectionUpdate {
 	const record = asPlainRecord(value) ?? {};
 	const updates: SessionConnectionUpdate = {};
-	const providerId = readConnectionString(record.providerId);
-	if (providerId) updates.providerId = providerId;
 	const modelId = readConnectionString(record.modelId);
 	if (modelId) updates.modelId = modelId;
-	const apiKey = readConnectionString(record.apiKey);
-	if (apiKey !== undefined) updates.apiKey = apiKey;
-	const baseUrl = readConnectionString(record.baseUrl);
-	if (baseUrl !== undefined) updates.baseUrl = baseUrl;
-	if (record.headers && typeof record.headers === "object") {
-		updates.headers = record.headers as Record<string, string>;
-	}
 	if (record.providerConfig && typeof record.providerConfig === "object") {
 		updates.providerConfig =
 			record.providerConfig as unknown as SessionConnectionUpdate["providerConfig"];
@@ -272,10 +263,6 @@ export async function handleSessionCreate(
 			: undefined,
 		initialCompactionState,
 		localRuntime: {
-			modelCatalogDefaults: {
-				loadLatestOnInit: true,
-				loadPrivateOnAuth: true,
-			},
 			configExtensions,
 			...clientContributionRuntime.localRuntime,
 		},
@@ -286,13 +273,7 @@ export async function handleSessionCreate(
 		config: {
 			...(sessionConfig ?? {}),
 			sessionId,
-			providerId:
-				sessionConfig?.providerId ??
-				(typeof modelSelection.provider === "string"
-					? modelSelection.provider
-					: typeof metadata.provider === "string"
-						? metadata.provider
-						: "hub"),
+			providerId: "bedrock" as const,
 			modelId:
 				sessionConfig?.modelId ??
 				(typeof modelSelection.model === "string"
@@ -300,11 +281,6 @@ export async function handleSessionCreate(
 					: typeof metadata.model === "string"
 						? metadata.model
 						: "hub"),
-			apiKey:
-				sessionConfig?.apiKey ??
-				(typeof modelSelection.apiKey === "string"
-					? modelSelection.apiKey
-					: undefined),
 			cwd:
 				sessionConfig?.cwd ??
 				(typeof payload.cwd === "string" && payload.cwd.trim()
@@ -318,9 +294,7 @@ export async function handleSessionCreate(
 					: ""),
 			mode:
 				sessionConfig?.mode ??
-				(runtimeOptions.mode === "plan" || runtimeOptions.mode === "yolo"
-					? runtimeOptions.mode
-					: "act"),
+				(runtimeOptions.mode === "plan" ? runtimeOptions.mode : "act"),
 			maxIterations:
 				sessionConfig?.maxIterations ??
 				(typeof runtimeOptions.maxIterations === "number"
@@ -347,11 +321,9 @@ export async function handleSessionCreate(
 			!Array.isArray(payload.toolPolicies)
 				? (JSON.parse(JSON.stringify(payload.toolPolicies)) as Record<
 						string,
-						{ autoApprove?: boolean; enabled?: boolean }
+						{ enabled?: boolean }
 					>)
-				: runtimeOptions.autoApproveTools === true
-					? { "*": { autoApprove: true } }
-					: undefined,
+				: undefined,
 	});
 	logHubMessage("info", "session.create.start_session.end", {
 		...baseLogContext,
@@ -501,6 +473,7 @@ export async function handleSessionRestore(
 			restore: {
 				messages: restoreOptions.messages as boolean | undefined,
 				workspace: restoreOptions.workspace as boolean | undefined,
+				workspaceApproved: restoreOptions.workspaceApproved === true,
 				omitCheckpointMessageFromSession:
 					restoreOptions.omitCheckpointMessageFromSession === true,
 			},
@@ -537,10 +510,6 @@ export async function handleSessionRestore(
 					initialMessages: context.initialMessages,
 					initialCompactionState,
 					localRuntime: {
-						modelCatalogDefaults: {
-							loadLatestOnInit: true,
-							loadPrivateOnAuth: true,
-						},
 						configExtensions,
 						...clientContributionRuntime.localRuntime,
 					},
@@ -551,21 +520,12 @@ export async function handleSessionRestore(
 					config: {
 						...(sessionConfig ?? {}),
 						sessionId,
-						providerId:
-							sessionConfig?.providerId ??
-							(typeof modelSelection.provider === "string"
-								? modelSelection.provider
-								: context.sourceSession.provider),
+						providerId: "bedrock" as const,
 						modelId:
 							sessionConfig?.modelId ??
 							(typeof modelSelection.model === "string"
 								? modelSelection.model
 								: context.sourceSession.model),
-						apiKey:
-							sessionConfig?.apiKey ??
-							(typeof modelSelection.apiKey === "string"
-								? modelSelection.apiKey
-								: ""),
 						cwd: sessionConfig?.cwd ?? context.plan.cwd,
 						workspaceRoot: sessionConfig?.workspaceRoot ?? workspaceRoot,
 						systemPrompt:
@@ -575,9 +535,7 @@ export async function handleSessionRestore(
 								: ""),
 						mode:
 							sessionConfig?.mode ??
-							(runtimeOptions.mode === "plan" || runtimeOptions.mode === "yolo"
-								? runtimeOptions.mode
-								: "act"),
+							(runtimeOptions.mode === "plan" ? runtimeOptions.mode : "act"),
 						maxIterations:
 							sessionConfig?.maxIterations ??
 							(typeof runtimeOptions.maxIterations === "number"
@@ -609,11 +567,9 @@ export async function handleSessionRestore(
 						!Array.isArray(payload.toolPolicies)
 							? (JSON.parse(JSON.stringify(payload.toolPolicies)) as Record<
 									string,
-									{ autoApprove?: boolean; enabled?: boolean }
+									{ enabled?: boolean }
 								>)
-							: runtimeOptions.autoApproveTools === true
-								? { "*": { autoApprove: true } }
-								: undefined,
+							: undefined,
 				};
 			},
 			startSession: (startInput) => ctx.sessionHost.startSession(startInput),

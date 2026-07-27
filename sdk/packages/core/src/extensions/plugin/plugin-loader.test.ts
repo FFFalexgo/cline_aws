@@ -98,12 +98,12 @@ describe("plugin-loader", () => {
 			"utf8",
 		);
 
-		const sdkDir = join(dir, "node_modules", "@cline", "shared");
+		const sdkDir = join(dir, "node_modules", "@bedrockCoder", "shared");
 		await mkdir(sdkDir, { recursive: true });
 		await writeFile(
 			join(sdkDir, "package.json"),
 			JSON.stringify({
-				name: "@cline/shared",
+				name: "@bedrock-coder/shared",
 				type: "module",
 				exports: "./index.js",
 			}),
@@ -117,7 +117,7 @@ describe("plugin-loader", () => {
 		await writeFile(
 			join(dir, "plugin-with-sdk-dep.ts"),
 			[
-				"import { sdkMarker } from '@cline/shared';",
+				"import { sdkMarker } from '@bedrock-coder/shared';",
 				"export default {",
 				"  name: sdkMarker,",
 				"  manifest: { capabilities: ['tools'] },",
@@ -129,11 +129,11 @@ describe("plugin-loader", () => {
 		await writeFile(
 			join(copyDir, "portable-subagents.ts"),
 			[
-				"import { safeJsonStringify } from '@cline/shared';",
-				"import { resolveClineDataDir } from '@cline/shared/storage';",
+				"import { safeJsonStringify } from '@bedrock-coder/shared';",
+				"import { resolveBedrockCoderDataDir } from '@bedrock-coder/shared/storage';",
 				"import YAML from 'yaml';",
 				"export default {",
-				"  name: typeof safeJsonStringify === 'function' ? YAML.stringify({ ok: !!resolveClineDataDir() }) : 'invalid',",
+				"  name: typeof safeJsonStringify === 'function' ? YAML.stringify({ ok: !!resolveBedrock CoderDataDir() }) : 'invalid',",
 				"  manifest: { capabilities: ['tools'] },",
 				"};",
 			].join("\n"),
@@ -147,7 +147,7 @@ describe("plugin-loader", () => {
 			JSON.stringify({
 				name: "packaged-plugin",
 				type: "module",
-				cline: {
+				bedrockCoder: {
 					plugins: ["index.ts"],
 				},
 			}),
@@ -165,31 +165,6 @@ describe("plugin-loader", () => {
 			"utf8",
 		);
 
-		const packagedSdkSubpathDir = join(copyDir, "packaged-sdk-subpath");
-		await mkdir(packagedSdkSubpathDir, { recursive: true });
-		await writeFile(
-			join(packagedSdkSubpathDir, "package.json"),
-			JSON.stringify({
-				name: "packaged-sdk-subpath",
-				type: "module",
-				cline: {
-					plugins: ["index.ts"],
-				},
-			}),
-			"utf8",
-		);
-		await writeFile(
-			join(packagedSdkSubpathDir, "index.ts"),
-			[
-				"import { createConfiguredTelemetryHandle } from '@cline/core/telemetry';",
-				"export default {",
-				"  name: typeof createConfiguredTelemetryHandle === 'function' ? 'sdk-subpath-ok' : 'invalid',",
-				"  manifest: { capabilities: ['tools'] },",
-				"};",
-			].join("\n"),
-			"utf8",
-		);
-
 		const packagedTypeOnlyDir = join(copyDir, "packaged-type-only-imports");
 		await mkdir(packagedTypeOnlyDir, { recursive: true });
 		await writeFile(
@@ -197,7 +172,7 @@ describe("plugin-loader", () => {
 			JSON.stringify({
 				name: "packaged-type-only-imports",
 				type: "module",
-				cline: {
+				bedrockCoder: {
 					plugins: ["index.ts"],
 				},
 			}),
@@ -246,7 +221,7 @@ describe("plugin-loader", () => {
 			[
 				"export default {",
 				"  name: 'targeted-plugin',",
-				"  manifest: { capabilities: ['tools'], providerIds: ['openai'], modelIds: ['gpt-5.4'] },",
+				"  manifest: { capabilities: ['tools'], providerIds: ['bedrock'], modelIds: ['anthropic.claude-sonnet-4-6'] },",
 				"};",
 			].join("\n"),
 			"utf8",
@@ -331,14 +306,14 @@ describe("plugin-loader", () => {
 	});
 
 	it("resolves standalone plugin dependencies from the npm wrapper path", async () => {
-		const previousWrapperPath = process.env.CLINE_WRAPPER_PATH;
+		const previousWrapperPath = process.env.BEDROCK_CODER_WRAPPER_PATH;
 		const wrapperRoot = join(dir, "wrapper-root");
 		const wrapperBinDir = join(wrapperRoot, "bin");
 		const depDir = join(wrapperRoot, "node_modules", "wrapper-host-dep");
 		const pluginPath = join(dir, "plugin-with-wrapper-dep.ts");
 		await mkdir(wrapperBinDir, { recursive: true });
 		await mkdir(depDir, { recursive: true });
-		await writeFile(join(wrapperBinDir, "cline"), "#!/usr/bin/env node\n");
+		await writeFile(join(wrapperBinDir, "bedrockCoder"), "#!/usr/bin/env node\n");
 		await writeFile(
 			join(depDir, "package.json"),
 			JSON.stringify({
@@ -366,14 +341,14 @@ describe("plugin-loader", () => {
 		);
 
 		try {
-			process.env.CLINE_WRAPPER_PATH = join(wrapperBinDir, "cline");
+			process.env.BEDROCK_CODER_WRAPPER_PATH = join(wrapperBinDir, "bedrockCoder");
 			const plugin = await loadAgentPluginFromPath(pluginPath);
 			expect(plugin.name).toBe("wrapper-host-dep");
 		} finally {
 			if (previousWrapperPath === undefined) {
-				delete process.env.CLINE_WRAPPER_PATH;
+				delete process.env.BEDROCK_CODER_WRAPPER_PATH;
 			} else {
-				process.env.CLINE_WRAPPER_PATH = previousWrapperPath;
+				process.env.BEDROCK_CODER_WRAPPER_PATH = previousWrapperPath;
 			}
 		}
 	});
@@ -385,17 +360,6 @@ describe("plugin-loader", () => {
 				useCache: true,
 			}),
 		).rejects.toThrow(/Cannot find (package|module) 'yaml'/i);
-	});
-
-	it("allows package-based plugins to use host SDK subpath exports", async () => {
-		const plugin = await loadAgentPluginFromPath(
-			join(copyDir, "packaged-sdk-subpath", "index.ts"),
-			{
-				cwd: join(copyDir, "packaged-sdk-subpath"),
-				useCache: true,
-			},
-		);
-		expect(plugin.name).toBe("sdk-subpath-ok");
 	});
 
 	it("allows package-based TypeScript plugins to reference type-only packages", async () => {
@@ -452,8 +416,8 @@ describe("plugin-loader", () => {
 		const report = await loadAgentPluginsFromPathsWithDiagnostics(
 			[join(dir, "plugin-a.mjs"), join(dir, "targeted-plugin.mjs")],
 			{
-				providerId: "openai",
-				modelId: "gpt-5.4",
+				providerId: "bedrock",
+				modelId: "anthropic.claude-sonnet-4-6",
 			},
 		);
 		expect(report.plugins.map((plugin) => plugin.name)).toEqual([
@@ -464,8 +428,8 @@ describe("plugin-loader", () => {
 		const filtered = await loadAgentPluginsFromPathsWithDiagnostics(
 			[join(dir, "plugin-a.mjs"), join(dir, "targeted-plugin.mjs")],
 			{
-				providerId: "anthropic",
-				modelId: "claude-sonnet-4.5",
+				providerId: "bedrock",
+				modelId: "anthropic.claude-haiku-4-5-20251001-v1:0",
 			},
 		);
 		expect(filtered.plugins.map((plugin) => plugin.name)).toEqual(["plugin-a"]);

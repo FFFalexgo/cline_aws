@@ -12,12 +12,11 @@ import {
 	type BasicLogger,
 	createTool,
 	type HookErrorMode,
-	type ITelemetryService,
 	type ToolApprovalRequest,
 	type ToolApprovalResult,
 	type ToolPolicy,
 	zodToJsonSchema,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import { z } from "zod";
 import {
 	createDelegatedAgent,
@@ -108,7 +107,6 @@ export interface SpawnAgentToolConfig {
 	 * Optional logger forwarded to spawned sub-agent runs.
 	 */
 	logger?: BasicLogger;
-	telemetry?: ITelemetryService;
 }
 
 /**

@@ -1,20 +1,22 @@
 import { readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import type * as LlmsProviders from "@cline/llms";
+import type * as LlmsProviders from "@bedrock-coder/llms";
 import {
 	type AgentConfig,
 	type AgentEvent,
 	type AgentResult,
 	type BasicLogger,
-	captureSdkError,
+	type CreateTeamTaskInput,
 	createSessionId,
-	type ITelemetryService,
-	isLikelyAuthError,
+	getToolApprovalDecision,
 	normalizeUserInput,
-} from "@cline/shared";
-import { setHomeDirIfUnset } from "@cline/shared/storage";
-import { isOAuthProvider } from "../../auth/provider-auth-registry";
+	type TeamBoardSnapshot,
+	type TeamRunRecord,
+	type TeamTask,
+	type UpdateTeamTaskInput,
+} from "@bedrock-coder/shared";
+import { setHomeDirIfUnset } from "@bedrock-coder/shared/storage";
 import {
 	createCompactionStateAwarePrepareTurn,
 	createContextCompactionPrepareTurn,
@@ -23,7 +25,6 @@ import type { ToolExecutors } from "../../extensions/tools";
 import { DefaultToolNames } from "../../extensions/tools";
 import type { TeamEvent } from "../../extensions/tools/team";
 import type { HookEventPayload } from "../../hooks";
-import { buildTelemetryAgentIdentity } from "../../services/agent-events";
 import { resolveWorkspacePath } from "../../services/config";
 import { prepareLocalRuntimeBootstrap } from "../../services/local-runtime-bootstrap";
 import { nowIso } from "../../services/session-artifacts";
@@ -31,19 +32,7 @@ import {
 	toSessionRecord,
 	withLatestAssistantTurnMetadata,
 } from "../../services/session-data";
-import {
-	emitMentionTelemetry,
-	emitSessionCreationTelemetry,
-} from "../../services/session-telemetry";
-import { ProviderSettingsManager } from "../../services/storage/provider-settings-manager";
-import {
-	captureAgentCreated,
-	captureAgentTeamCreated,
-	captureConversationTurnEvent,
-	captureModeSwitch,
-	captureTaskCompleted,
-} from "../../services/telemetry/core-events";
-import { resolveCoreDistinctId } from "../../services/telemetry/distinct-id";
+import { BedrockSettingsStore } from "../../services/storage/bedrock-settings-store";
 import {
 	accumulateUsageTotals,
 	createInitialAccumulatedUsage,
@@ -91,12 +80,10 @@ import type { RuntimeCapabilities } from "../capabilities";
 import { normalizeRuntimeCapabilities } from "../capabilities";
 import { normalizeConnectionUpdate } from "../config/connection-update";
 import { DefaultRuntimeBuilder } from "../orchestration/runtime-builder";
-import {
-	OAuthReauthRequiredError,
-	type RuntimeOAuthResolution,
-	RuntimeOAuthTokenManager,
-} from "../orchestration/runtime-oauth-token-manager";
-import type { RuntimeBuilder } from "../orchestration/session-runtime";
+import type {
+	RuntimeBuilder,
+	TeamRuntimeService,
+} from "../orchestration/session-runtime";
 import { SessionRuntime } from "../orchestration/session-runtime-orchestrator";
 import { PendingPromptsController } from "../turn-queue/pending-prompt-service";
 import { manifestToSessionRecord } from "./history";
@@ -203,22 +190,18 @@ function isIncomingCompactionStateStale(
 }
 
 export interface LocalRuntimeHostOptions {
-	distinctId?: string;
 	sessionService: SessionBackend;
 	runtimeBuilder?: RuntimeBuilder;
 	createAgent?: (config: AgentConfig) => SessionRuntime;
 	capabilities?: RuntimeCapabilities;
 	toolPolicies?: AgentConfig["toolPolicies"];
-	providerSettingsManager?: ProviderSettingsManager;
-	oauthTokenManager?: RuntimeOAuthTokenManager;
-	telemetry?: ITelemetryService;
+	bedrockSettingsStore?: BedrockSettingsStore;
 	logger?: BasicLogger;
 	/**
 	 * Default custom `fetch` implementation threaded into every
 	 * `ProviderConfig.fetch` built during local session bootstrap. Used by
 	 * the AI gateway providers when issuing HTTP requests.
 	 */
-	fetch?: typeof fetch;
 }
 
 export class LocalRuntimeHost implements RuntimeHost {
@@ -230,11 +213,8 @@ export class LocalRuntimeHost implements RuntimeHost {
 	private readonly toolExecutors?: Partial<ToolExecutors>;
 	private readonly defaultCapabilities?: RuntimeCapabilities;
 	private readonly defaultToolPolicies?: AgentConfig["toolPolicies"];
-	private readonly providerSettingsManager: ProviderSettingsManager;
-	private readonly oauthTokenManager: RuntimeOAuthTokenManager;
-	private readonly defaultTelemetry?: ITelemetryService;
+	private readonly bedrockSettingsStore: BedrockSettingsStore;
 	private readonly defaultLogger?: BasicLogger;
-	private readonly defaultFetch?: typeof fetch;
 	private readonly events = new RuntimeHostEventBus();
 	private readonly sessions = new Map<string, ActiveSession>();
 	// Serializes manifest read-modify-writes per session; see mutateSessionManifest.
@@ -252,7 +232,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 	constructor(options: LocalRuntimeHostOptions) {
 		const homeDir = homedir();
 		if (homeDir) setHomeDirIfUnset(homeDir);
-		const distinctId = resolveCoreDistinctId(options.distinctId);
 		this.sessionService = options.sessionService;
 		this.runtimeBuilder = options.runtimeBuilder ?? new DefaultRuntimeBuilder();
 		this.createAgentInstance =
@@ -262,18 +241,9 @@ export class LocalRuntimeHost implements RuntimeHost {
 		);
 		this.toolExecutors = this.defaultCapabilities?.toolExecutors;
 		this.defaultToolPolicies = options.toolPolicies;
-		this.providerSettingsManager =
-			options.providerSettingsManager ?? new ProviderSettingsManager();
-		this.oauthTokenManager =
-			options.oauthTokenManager ??
-			new RuntimeOAuthTokenManager({
-				providerSettingsManager: this.providerSettingsManager,
-				telemetry: options.telemetry,
-			});
-		this.defaultTelemetry = options.telemetry;
+		this.bedrockSettingsStore =
+			options.bedrockSettingsStore ?? new BedrockSettingsStore();
 		this.defaultLogger = options.logger;
-		this.defaultTelemetry?.setDistinctId(distinctId);
-		this.defaultFetch = options.fetch;
 
 		this.pendingPromptsController = new PendingPromptsController({
 			getSession: (sid) => this.sessions.get(sid),
@@ -306,30 +276,47 @@ export class LocalRuntimeHost implements RuntimeHost {
 		});
 	}
 
-	private async applyInitialOAuthCredentials(
-		input: ResolvedStartSessionInput,
-	): Promise<ResolvedStartSessionInput> {
-		if (input.config.apiKey?.trim()) {
-			return input;
-		}
+	// ── Public API ──────────────────────────────────────────────────────
 
-		const resolved = await this.oauthTokenManager.resolveProviderApiKey({
-			providerId: input.config.providerId,
-		});
-		if (!resolved?.apiKey) {
-			return input;
-		}
-
-		return {
-			...input,
-			config: {
-				...input.config,
-				apiKey: resolved.apiKey,
-			},
-		};
+	getTeamBoard(sessionId: string): TeamBoardSnapshot | undefined {
+		return (
+			this.runtimeBuilder as RuntimeBuilder & Partial<TeamRuntimeService>
+		).getTeamBoard?.(sessionId);
 	}
 
-	// ── Public API ──────────────────────────────────────────────────────
+	createTeamTask(
+		sessionId: string,
+		input: Omit<CreateTeamTaskInput, "createdBy">,
+	): TeamTask {
+		const service = this.runtimeBuilder as RuntimeBuilder &
+			Partial<TeamRuntimeService>;
+		if (!service.createTeamTask) {
+			throw new Error("Local team task management is unavailable");
+		}
+		return service.createTeamTask(sessionId, input);
+	}
+
+	updateTeamTask(sessionId: string, input: UpdateTeamTaskInput): TeamTask {
+		const service = this.runtimeBuilder as RuntimeBuilder &
+			Partial<TeamRuntimeService>;
+		if (!service.updateTeamTask) {
+			throw new Error("Local team task management is unavailable");
+		}
+		return service.updateTeamTask(sessionId, input);
+	}
+
+	cancelTeamRun(
+		sessionId: string,
+		runId: string,
+		reason?: string,
+	): TeamRunRecord {
+		const service = this.runtimeBuilder as RuntimeBuilder &
+			Partial<TeamRuntimeService>;
+		if (!service.cancelTeamRun) {
+			throw new Error("Local team run management is unavailable");
+		}
+		return service.cancelTeamRun(sessionId, runId, reason);
+	}
 
 	async startSession(input: StartSessionInput): Promise<StartSessionResult> {
 		const requestedSessionId = input.config.sessionId?.trim() ?? "";
@@ -371,8 +358,7 @@ export class LocalRuntimeHost implements RuntimeHost {
 	): Promise<StartSessionResult> {
 		const source = input.source ?? SessionSource.CLI;
 		const startedAt = nowIso();
-		const startInput: ResolvedStartSessionInput =
-			await this.applyInitialOAuthCredentials(input);
+		const startInput: ResolvedStartSessionInput = input;
 		const initialMessages = startInput.initialMessages ?? [];
 		const initialUsage =
 			initialMessages.length > 0
@@ -461,8 +447,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 			| undefined;
 		const pluginEventFallbackLogger =
 			inputLocalConfig?.extensionContext?.logger ?? inputLocalConfig?.logger;
-		const pluginEventFallbackAutomation =
-			inputLocalConfig?.extensionContext?.automation;
 		let bootstrap!: Awaited<ReturnType<typeof prepareLocalRuntimeBootstrap>>;
 		const subAgentDeps = {
 			getSession: (sid: string) => this.sessions.get(sid),
@@ -479,12 +463,10 @@ export class LocalRuntimeHost implements RuntimeHost {
 			input: startInput,
 			localRuntime: input.localRuntime,
 			sessionId,
-			providerSettingsManager: this.providerSettingsManager,
-			defaultTelemetry: this.defaultTelemetry,
+			bedrockSettingsStore: this.bedrockSettingsStore,
 			defaultLogger: this.defaultLogger,
 			defaultCapabilities: capabilities,
 			defaultToolPolicies: this.defaultToolPolicies,
-			defaultFetch: this.defaultFetch,
 			onPluginEvent: (event) => {
 				if (event.name === "plugin_log") {
 					this.eventBridge.handlePluginLog(
@@ -494,11 +476,7 @@ export class LocalRuntimeHost implements RuntimeHost {
 					);
 					return;
 				}
-				void this.eventBridge.handlePluginEvent(
-					sessionId,
-					event,
-					pluginEventFallbackAutomation,
-				);
+				void this.eventBridge.handlePluginEvent(sessionId, event);
 			},
 			onTeamEvent: (event: TeamEvent) => {
 				void this.eventBridge.handleTeamEvent(sessionId, event);
@@ -539,28 +517,16 @@ export class LocalRuntimeHost implements RuntimeHost {
 			configWithProvider.teamName = runtime.teamRuntime.getTeamName();
 		}
 
-		// Auth-retry hook for every agent in the session (lead, teammates,
-		// subagents): refresh OAuth credentials and propagate the new key to
-		// all connections, then let the runtime retry the failed run. Without
-		// this, a token that expires while the lead is blocked (e.g. in
-		// team_await_runs) kills teammate runs with a raw provider 401.
-		const onAuthError = async (): Promise<boolean> => {
-			const liveSession = this.sessions.get(sessionId);
-			if (!liveSession || !isOAuthProvider(liveSession.config.providerId)) {
-				return false;
-			}
-			try {
-				await this.syncOAuthCredentials(liveSession, { forceRefresh: true });
-				return true;
-			} catch {
-				return false;
-			}
-		};
-		runtime.delegatedAgentConfigProvider?.updateConnectionDefaults({
-			onAuthError,
-		});
-
-		const tools = [...runtime.tools, ...(configWithProvider.extraTools ?? [])];
+		const tools = [
+			...runtime.tools,
+			...(configWithProvider.extraTools ?? []),
+		].filter(
+			(tool) =>
+				getToolApprovalDecision({
+					toolName: tool.name,
+					mode: configWithProvider.mode,
+				}) !== "prohibited",
+		);
 		const extensions = runtime.extensions ?? bootstrap.extensions;
 		const explicitInitialCompactionState = startInput.initialCompactionState;
 		let activeSessionRef: ActiveSession | undefined;
@@ -605,18 +571,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 								"Failed to persist session compaction state",
 								{ sessionId: activeSession.sessionId, error },
 							);
-							captureSdkError(configWithProvider.telemetry, {
-								component: "core",
-								operation: "session.persist_compaction_state",
-								severity: "warn",
-								handled: true,
-								error,
-								context: {
-									sessionId: activeSession.sessionId,
-									providerId: configWithProvider.providerId,
-									modelId: configWithProvider.modelId,
-								},
-							});
 						}
 					},
 				})
@@ -626,10 +580,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 			sessionId,
 			providerId: providerConfig.providerId,
 			modelId: providerConfig.modelId,
-			apiKey: providerConfig.apiKey,
-			baseUrl: providerConfig.baseUrl,
-			headers: providerConfig.headers,
-			onAuthError,
 			knownModels: providerConfig.knownModels,
 			providerConfig,
 			thinking: configWithProvider.thinking,
@@ -639,6 +589,7 @@ export class LocalRuntimeHost implements RuntimeHost {
 			maxTokensPerTurn: configWithProvider.maxTokensPerTurn,
 			temperature: configWithProvider.temperature,
 			systemPrompt: configWithProvider.systemPrompt,
+			mode: configWithProvider.mode,
 			maxIterations: configWithProvider.maxIterations,
 			execution: configWithProvider.execution,
 			prepareTurn,
@@ -672,7 +623,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 						}
 					}
 				: undefined,
-			telemetry: configWithProvider.telemetry,
 			onConsecutiveMistakeLimitReached:
 				configWithProvider.onConsecutiveMistakeLimitReached,
 			completionPolicy: runtime.completionPolicy,
@@ -714,18 +664,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 						"Failed to persist session messages after assistant response",
 						{ sessionId, error },
 					);
-					captureSdkError(configWithProvider.telemetry, {
-						component: "core",
-						operation: "session.persist_messages_after_assistant_response",
-						error,
-						severity: "warn",
-						handled: true,
-						context: {
-							sessionId,
-							providerId: configWithProvider.providerId,
-							modelId: configWithProvider.modelId,
-						},
-					});
 				}
 			},
 		};
@@ -734,38 +672,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 			agent.subscribeEvents(agentConfig.onEvent);
 		}
 		runtime.registerLeadAgent?.(agent);
-		const rootAgentIdentity = buildTelemetryAgentIdentity({
-			agentId: agent.getAgentId(),
-			conversationId: agent.getConversationId(),
-			teamId: runtime.teamRuntime?.getTeamId(),
-			teamName: runtime.teamRuntime?.getTeamName(),
-			teamRole: runtime.teamRuntime ? "lead" : undefined,
-		});
-		emitSessionCreationTelemetry(
-			configWithProvider,
-			sessionId,
-			wasSessionIdRequested,
-			workspacePath,
-			rootAgentIdentity,
-		);
-		if (rootAgentIdentity) {
-			captureAgentCreated(configWithProvider.telemetry, {
-				ulid: sessionId,
-				modelId: configWithProvider.modelId,
-				provider: configWithProvider.providerId,
-				...rootAgentIdentity,
-			});
-		}
-		if (runtime.teamRuntime) {
-			captureAgentTeamCreated(configWithProvider.telemetry, {
-				ulid: sessionId,
-				teamId: runtime.teamRuntime.getTeamId(),
-				teamName: runtime.teamRuntime.getTeamName(),
-				leadAgentId: agent.getAgentId(),
-				restoredFromPersistence: runtime.teamRestoredFromPersistence === true,
-			});
-		}
-
 		const active: ActiveSession = {
 			sessionId,
 			config: configWithProvider,
@@ -859,18 +765,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 			if (active.interactive && active.aborting) {
 				result = await this.completeAbortedInteractiveTurn(active);
 			} else {
-				captureSdkError(active.config.telemetry, {
-					component: "core",
-					operation: "session.start",
-					error,
-					severity: "error",
-					handled: false,
-					context: {
-						sessionId: active.sessionId,
-						providerId: active.config.providerId,
-						modelId: active.config.modelId,
-					},
-				});
 				try {
 					await this.failSession(active);
 				} catch (cleanupError) {
@@ -926,16 +820,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 		const delivery =
 			input.delivery ??
 			(session.interactive && !canStartRun ? ("queue" as const) : undefined);
-		session.config.telemetry?.capture({
-			event: "session.input_sent",
-			properties: {
-				sessionId: input.sessionId,
-				promptLength: input.prompt.length,
-				userImageCount: input.userImages?.length ?? 0,
-				userFileCount: input.userFiles?.length ?? 0,
-				delivery: delivery ?? "immediate",
-			},
-		});
 		if (delivery === "queue" || delivery === "steer") {
 			this.pendingPromptsController.enqueue(input.sessionId, {
 				prompt: input.prompt,
@@ -972,18 +856,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 			if (session.interactive && session.aborting) {
 				return await this.completeAbortedInteractiveTurn(session);
 			}
-			captureSdkError(session.config.telemetry, {
-				component: "core",
-				operation: "session.submit",
-				error,
-				severity: "error",
-				handled: false,
-				context: {
-					sessionId: session.sessionId,
-					providerId: session.config.providerId,
-					modelId: session.config.modelId,
-				},
-			});
 			await this.failSession(session);
 			throw error;
 		}
@@ -1002,10 +874,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 	async abort(sessionId: string, reason?: unknown): Promise<void> {
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
-		session.config.telemetry?.capture({
-			event: "session.aborted",
-			properties: { sessionId },
-		});
 		session.aborting = true;
 		this.pendingPromptsController.clearAborted(session);
 		session.agent.abort(reason);
@@ -1014,10 +882,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 	async stopSession(sessionId: string): Promise<void> {
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
-		session.config.telemetry?.capture({
-			event: "session.stopped",
-			properties: { sessionId },
-		});
 		if (session.interactive && !isNonTerminalSessionStatus(session.status)) {
 			await this.releaseSessionRuntime(session, "session_stop");
 			return;
@@ -1357,12 +1221,7 @@ export class LocalRuntimeHost implements RuntimeHost {
 	): Promise<void> {
 		const updates = normalizeConnectionUpdate(rawUpdates);
 		const session = this.getSessionOrThrow(sessionId);
-		if (updates.providerId !== undefined)
-			session.config.providerId = updates.providerId;
 		if (updates.modelId !== undefined) session.config.modelId = updates.modelId;
-		if (updates.apiKey !== undefined) session.config.apiKey = updates.apiKey;
-		if (updates.baseUrl !== undefined) session.config.baseUrl = updates.baseUrl;
-		if (updates.headers !== undefined) session.config.headers = updates.headers;
 		if (updates.providerConfig !== undefined)
 			session.config.providerConfig = updates.providerConfig;
 		if (Object.hasOwn(updates, "reasoningEffort")) {
@@ -1380,13 +1239,7 @@ export class LocalRuntimeHost implements RuntimeHost {
 			}
 		}
 		const delegatedUpdates = {
-			...(updates.providerId !== undefined
-				? { providerId: updates.providerId }
-				: {}),
 			...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
-			...(updates.apiKey !== undefined ? { apiKey: updates.apiKey } : {}),
-			...(updates.baseUrl !== undefined ? { baseUrl: updates.baseUrl } : {}),
-			...(updates.headers !== undefined ? { headers: updates.headers } : {}),
 			...(updates.providerConfig !== undefined
 				? { providerConfig: updates.providerConfig }
 				: {}),
@@ -1404,21 +1257,14 @@ export class LocalRuntimeHost implements RuntimeHost {
 			delegatedUpdates.reasoningEffort = undefined;
 			delegatedUpdates.thinkingBudgetTokens = undefined;
 		}
-		const teammateUpdates = {
-			...(updates.apiKey !== undefined ? { apiKey: updates.apiKey } : {}),
-			...(updates.baseUrl !== undefined ? { baseUrl: updates.baseUrl } : {}),
-			...(updates.headers !== undefined ? { headers: updates.headers } : {}),
-		};
 		session.runtime.delegatedAgentConfigProvider?.updateConnectionDefaults(
 			delegatedUpdates,
 		);
 		session.agent.updateConnection(updates);
-		session.runtime.teamRuntime?.updateTeammateConnections(teammateUpdates);
 		// Keep the persisted manifest in sync so session history reflects the
 		// connection the session is now using, not the one it started with.
-		if (updates.providerId || updates.modelId) {
+		if (updates.modelId) {
 			await this.mutateSessionManifest(session, (manifest) => {
-				if (updates.providerId) manifest.provider = updates.providerId;
 				if (updates.modelId) manifest.model = updates.modelId;
 			});
 		}
@@ -1474,15 +1320,8 @@ export class LocalRuntimeHost implements RuntimeHost {
 	handlePluginEvent(
 		rootSessionId: string,
 		event: { name: string; payload?: unknown },
-		fallbackAutomation?: NonNullable<
-			CoreSessionConfig["extensionContext"]
-		>["automation"],
 	): Promise<void> {
-		return this.eventBridge.handlePluginEvent(
-			rootSessionId,
-			event,
-			fallbackAutomation,
-		);
+		return this.eventBridge.handlePluginEvent(rootSessionId, event);
 	}
 
 	// ── Turn execution ──────────────────────────────────────────────────
@@ -1507,7 +1346,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 		}
 		await this.ensureSessionPersisted(session);
 		await this.refreshActiveSessionGitMetadata(session);
-		await this.syncOAuthCredentials(session);
 		await this.markTurnRunning(session);
 
 		try {
@@ -1619,30 +1457,11 @@ export class LocalRuntimeHost implements RuntimeHost {
 		session.turnAggregateUsageBaseline = aggregateUsageBaseline;
 		session.turnPrimaryUsage = createInitialAccumulatedUsage();
 		session.turnUsageByAgent = new Map<string, SessionAccumulatedUsage>();
-
-		captureModeSwitch(
-			session.config.telemetry,
-			session.sessionId,
-			session.config.mode,
-		);
-		captureConversationTurnEvent(session.config.telemetry, {
-			ulid: session.sessionId,
-			provider: session.config.providerId,
-			model: session.config.modelId,
-			source: "user",
-			mode: session.config.mode,
-			...this.getSessionAgentTelemetryIdentity(session),
-		});
-
 		try {
 			const runFn = shouldContinue
 				? () => session.agent.continue(prompt, userImages, userFiles)
 				: () => session.agent.run(prompt, userImages, userFiles);
-			const result = await this.runWithAuthRetry(
-				session,
-				runFn,
-				baselineMessages,
-			);
+			const result = await runFn();
 
 			session.started = true;
 			const persistedMessages = withLatestAssistantTurnMetadata(
@@ -1684,18 +1503,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 			this.observeTaskCompletionTool(session, result);
 			return result;
 		} catch (error) {
-			captureSdkError(session.config.telemetry, {
-				component: "core",
-				operation: "session.turn",
-				error,
-				severity: "error",
-				handled: false,
-				context: {
-					sessionId: session.sessionId,
-					providerId: session.config.providerId,
-					modelId: session.config.modelId,
-				},
-			});
 			await this.invoke<void>(
 				"persistSessionMessages",
 				session.sessionId,
@@ -1712,16 +1519,16 @@ export class LocalRuntimeHost implements RuntimeHost {
 	}
 
 	/**
-	 * Anchor `task.completed` telemetry to the assistant's explicit
-	 * completion declaration. We emit at most once per session, the moment
+	 * Detect the assistant's explicit completion declaration. This occurs
+	 * at most once per session, the moment
 	 * a successful `submit_and_exit` tool call is observed in the run
-	 * result. This is the SDK analog of original Cline's
+	 * result. This is the SDK analog of original BedrockCoder's
 	 * `attempt_completion`-driven emission and works for both interactive
 	 * and non-interactive sessions.
 	 *
 	 * `shutdownSession(...)` retains a fallback emission for completed
 	 * sessions that finish without an explicit completion-tool observation
-	 * (e.g., non-interactive runs not using the yolo preset). This helper
+	 * (e.g., non-interactive runs). This helper
 	 * sets `submitAndExitObserved` so the shutdown fallback can suppress a
 	 * duplicate emission for the same logical completion.
 	 */
@@ -1737,15 +1544,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 		);
 		if (!completedWithSubmitAndExit) return;
 		session.submitAndExitObserved = true;
-		captureTaskCompleted(session.config.telemetry, {
-			ulid: session.sessionId,
-			provider: session.config.providerId,
-			modelId: session.config.modelId,
-			mode: session.config.mode,
-			durationMs: Date.now() - Date.parse(session.startedAt),
-			source: "submit_and_exit",
-			...this.getSessionAgentTelemetryIdentity(session),
-		});
 	}
 
 	private async prepareTurnInput(
@@ -1774,8 +1572,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 			normalizedPrompt,
 			mentionBaseDir,
 		);
-		emitMentionTelemetry(session.config.telemetry, enriched);
-
 		const prompt = formatModePrompt(
 			enriched.prompt,
 			input.mode ?? session.config.mode,
@@ -1939,15 +1735,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 		// observer in `executeAgentTurn(...)` already emitted the event in
 		// that case, so we suppress here to avoid double-counting.
 		if (input.status === "completed" && !session.submitAndExitObserved) {
-			captureTaskCompleted(session.config.telemetry, {
-				ulid: session.sessionId,
-				provider: session.config.providerId,
-				modelId: session.config.modelId,
-				mode: session.config.mode,
-				durationMs: Date.now() - Date.parse(session.startedAt),
-				source: "shutdown",
-				...this.getSessionAgentTelemetryIdentity(session),
-			});
 		}
 		notifyTeamRunWaiters(session);
 
@@ -1959,21 +1746,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 				stage,
 				error,
 				severity: "warn",
-			});
-			captureSdkError(session.config.telemetry, {
-				component: "core",
-				operation: "session.shutdown_cleanup",
-				error,
-				severity: "warn",
-				handled: true,
-				context: {
-					sessionId: session.sessionId,
-					stage,
-					status: input.status,
-					shutdownReason: input.shutdownReason,
-					providerId: session.config.providerId,
-					modelId: session.config.modelId,
-				},
 			});
 		};
 
@@ -2026,20 +1798,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 				stage,
 				error,
 				severity: "warn",
-			});
-			captureSdkError(session.config.telemetry, {
-				component: "core",
-				operation: "session.runtime_cleanup",
-				error,
-				severity: "warn",
-				handled: true,
-				context: {
-					sessionId: session.sessionId,
-					stage,
-					reason,
-					providerId: session.config.providerId,
-					modelId: session.config.modelId,
-				},
 			});
 		};
 
@@ -2102,70 +1860,12 @@ export class LocalRuntimeHost implements RuntimeHost {
 
 	// ── OAuth & auth ────────────────────────────────────────────────────
 
-	private async runWithAuthRetry(
-		session: ActiveSession,
-		run: () => Promise<AgentResult>,
-		baselineMessages: LlmsProviders.Message[],
-	): Promise<AgentResult> {
-		try {
-			return await run();
-		} catch (error) {
-			if (
-				!isOAuthProvider(session.config.providerId) ||
-				!isLikelyAuthError(error)
-			) {
-				throw error;
-			}
-			await this.syncOAuthCredentials(session, { forceRefresh: true });
-			session.agent.restore(baselineMessages);
-			return run();
-		}
-	}
-
-	private async syncOAuthCredentials(
-		session: ActiveSession,
-		options?: { forceRefresh?: boolean },
-	): Promise<void> {
-		let resolved: RuntimeOAuthResolution | null = null;
-		try {
-			resolved = await this.oauthTokenManager.resolveProviderApiKey({
-				providerId: session.config.providerId,
-				forceRefresh: options?.forceRefresh,
-			});
-		} catch (error) {
-			if (error instanceof OAuthReauthRequiredError) {
-				throw new Error(`${error.providerId} requires re-authentication.`);
-			}
-			throw error;
-		}
-		if (!resolved?.apiKey || session.config.apiKey === resolved.apiKey) return;
-		session.config.apiKey = resolved.apiKey;
-		session.agent.updateConnection({ apiKey: resolved.apiKey });
-		session.runtime.delegatedAgentConfigProvider?.updateConnectionDefaults({
-			apiKey: resolved.apiKey,
-		});
-		session.runtime.teamRuntime?.updateTeammateConnections({
-			apiKey: resolved.apiKey,
-		});
-	}
-
 	// ── Utility methods ─────────────────────────────────────────────────
 
 	private getSessionOrThrow(sessionId: string): ActiveSession {
 		const session = this.sessions.get(sessionId);
 		if (!session) {
 			const error = new SessionNotFoundError(sessionId);
-			captureSdkError(this.defaultTelemetry, {
-				component: "core",
-				operation: "session.active_lookup",
-				error,
-				severity: "warn",
-				handled: true,
-				context: {
-					sessionId,
-					activeSessionCount: this.sessions.size,
-				},
-			});
 			throw error;
 		}
 		return session;
@@ -2178,16 +1878,6 @@ export class LocalRuntimeHost implements RuntimeHost {
 			.filter((p) => p.length > 0)
 			.map((p) => (isAbsolute(p) ? p : resolve(cwd, p)));
 		return Array.from(new Set(resolved));
-	}
-
-	private getSessionAgentTelemetryIdentity(session: ActiveSession) {
-		return buildTelemetryAgentIdentity({
-			agentId: session.agent.getAgentId(),
-			conversationId: session.agent.getConversationId(),
-			teamId: session.runtime.teamRuntime?.getTeamId(),
-			teamName: session.runtime.teamRuntime?.getTeamName(),
-			teamRole: session.runtime.teamRuntime ? "lead" : undefined,
-		});
 	}
 
 	private async seedAggregateUsageFromArtifacts(input: {

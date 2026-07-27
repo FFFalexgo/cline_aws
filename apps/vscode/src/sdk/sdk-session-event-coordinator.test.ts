@@ -1,8 +1,7 @@
-import type { CoreSessionEvent } from "@cline/core"
-import type { ClineMessage } from "@shared/ExtensionMessage"
+import type { CoreSessionEvent } from "@bedrock-coder/core"
+import type { BedrockCoderMessage } from "@shared/ExtensionMessage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MessageTranslatorState } from "./message-translator"
-import { PROVIDER_FAILURE_ERROR_TYPE, PROVIDER_FAILURE_PHASE } from "./provider-failure-telemetry"
 import { SdkSessionEventCoordinator, type SdkSessionEventCoordinatorOptions } from "./sdk-session-event-coordinator"
 
 vi.mock("@/shared/services/Logger", () => ({
@@ -20,7 +19,7 @@ describe("SdkSessionEventCoordinator", () => {
 	})
 
 	it("translates and emits session messages, then posts state", async () => {
-		const message: ClineMessage = { ts: 1, type: "say", say: "text", text: "hello" }
+		const message: BedrockCoderMessage = { ts: 1, type: "say", say: "text", text: "hello" }
 		const { coordinator, options, event } = makeCoordinator({
 			translation: {
 				messages: [message],
@@ -111,7 +110,7 @@ describe("SdkSessionEventCoordinator", () => {
 	})
 
 	it("marks a submitted queued prompt as a new streaming turn", async () => {
-		const message: ClineMessage = { ts: 1, type: "say", say: "user_feedback", text: "queued prompt" }
+		const message: BedrockCoderMessage = { ts: 1, type: "say", say: "user_feedback", text: "queued prompt" }
 		const { coordinator, options } = makeCoordinator({
 			translation: {
 				messages: [message],
@@ -134,7 +133,6 @@ describe("SdkSessionEventCoordinator", () => {
 		await coordinator.handleSessionEvent(event)
 
 		expect(clearTurnOutcome).toHaveBeenCalledOnce()
-		expect(options.beginProviderFailureTelemetryTurn).toHaveBeenCalledOnce()
 		expect(options.sessions.setRunning).toHaveBeenCalledWith(true)
 		expect(options.setTurnPhase).toHaveBeenCalledWith("streaming")
 		expect(options.messages.appendAndEmit).toHaveBeenCalledWith([message], event)
@@ -208,47 +206,8 @@ describe("SdkSessionEventCoordinator", () => {
 		})
 	})
 
-	it("zeros usage and api request message cost for free Cline models", async () => {
-		const { coordinator, options, event } = makeCoordinator({
-			isClineFreeModel: vi.fn().mockResolvedValue(true),
-			task: { taskId: "task-1" },
-			translation: {
-				messages: [
-					{
-						ts: 1,
-						type: "say",
-						say: "api_req_started",
-						text: JSON.stringify({ tokensIn: 10, tokensOut: 5, cost: 0.0016 }),
-					},
-				],
-				sessionEnded: false,
-				turnComplete: false,
-				usage: { tokensIn: 10, tokensOut: 5, totalCost: 0.0016 },
-			},
-		})
-
-		await coordinator.handleSessionEvent(event)
-
-		expect(options.messages.appendAndEmit).toHaveBeenCalledWith(
-			[
-				{
-					ts: 1,
-					type: "say",
-					say: "api_req_started",
-					text: JSON.stringify({ tokensIn: 10, tokensOut: 5, cost: 0 }),
-				},
-			],
-			event,
-		)
-		expect(options.taskHistory.updateTaskUsage).toHaveBeenCalledWith("task-1", {
-			tokensIn: 10,
-			tokensOut: 5,
-			totalCost: 0,
-		})
-	})
-
 	it("leaves mistake-limit recovery to the SDK callback instead of mutating tool-error events", async () => {
-		const message: ClineMessage = { ts: 1, type: "say", say: "tool", text: "{}", partial: false }
+		const message: BedrockCoderMessage = { ts: 1, type: "say", say: "tool", text: "{}", partial: false }
 		const { coordinator, options, event } = makeCoordinator({
 			translation: {
 				messages: [message],
@@ -262,72 +221,6 @@ describe("SdkSessionEventCoordinator", () => {
 
 		expect(options.messages.appendAndEmit).toHaveBeenCalledWith([message], event)
 		expect(options.sessions.setRunning).not.toHaveBeenCalled()
-	})
-
-	it("captures provider failure telemetry for SDK agent errors", async () => {
-		const error = new Error("provider failed")
-		const { coordinator, options } = makeCoordinator()
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-123",
-				event: {
-					type: "error",
-					error,
-				},
-			},
-		} as unknown as CoreSessionEvent
-
-		await coordinator.handleSessionEvent(event)
-
-		expect(options.captureProviderApiError).toHaveBeenCalledWith({
-			sessionId: "session-123",
-			error,
-			errorType: PROVIDER_FAILURE_ERROR_TYPE.SDK_AGENT_ERROR,
-			failurePhase: PROVIDER_FAILURE_PHASE.STREAMING,
-		})
-	})
-
-	it("does not capture provider failure telemetry for SDK agent errors without an error payload", async () => {
-		const { coordinator, options } = makeCoordinator()
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-123",
-				event: {
-					type: "error",
-				},
-			},
-		} as unknown as CoreSessionEvent
-
-		await coordinator.handleSessionEvent(event)
-
-		expect(options.captureProviderApiError).not.toHaveBeenCalled()
-	})
-
-	it("captures provider failure telemetry when the SDK finishes a turn with reason error", async () => {
-		const { coordinator, options } = makeCoordinator()
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-123",
-				event: {
-					type: "done",
-					reason: "error",
-					text: "stream failed before assistant output",
-					iterations: 1,
-				},
-			},
-		} as unknown as CoreSessionEvent
-
-		await coordinator.handleSessionEvent(event)
-
-		expect(options.captureProviderApiError).toHaveBeenCalledWith({
-			sessionId: "session-123",
-			error: "stream failed before assistant output",
-			errorType: PROVIDER_FAILURE_ERROR_TYPE.SDK_AGENT_DONE_ERROR,
-			failurePhase: PROVIDER_FAILURE_PHASE.STREAMING,
-		})
 	})
 })
 
@@ -355,10 +248,7 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 		getTask: vi.fn(() => input.task),
 		postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		setTurnPhase: vi.fn(),
-		captureProviderApiError: vi.fn(),
-		beginProviderFailureTelemetryTurn: vi.fn(),
 		translateSessionEvent: vi.fn(() => input.translation ?? { messages: [], sessionEnded: false, turnComplete: false }),
-		isClineFreeModel: input.isClineFreeModel,
 	} as unknown as SdkSessionEventCoordinatorOptions & {
 		sessions: SdkSessionEventCoordinatorOptions["sessions"] & {
 			getActiveSession: ReturnType<typeof vi.fn>
@@ -367,8 +257,6 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 		messages: SdkSessionEventCoordinatorOptions["messages"] & { appendAndEmit: ReturnType<typeof vi.fn> }
 		taskHistory: SdkSessionEventCoordinatorOptions["taskHistory"] & { updateTaskUsage: ReturnType<typeof vi.fn> }
 		postStateToWebview: ReturnType<typeof vi.fn>
-		captureProviderApiError: ReturnType<typeof vi.fn>
-		beginProviderFailureTelemetryTurn: ReturnType<typeof vi.fn>
 		translateSessionEvent: ReturnType<typeof vi.fn>
 		messageTranslatorState: MessageTranslatorState
 	}
@@ -393,9 +281,8 @@ function makeActiveSession(input: Partial<{ isRunning: boolean }> = {}) {
 interface MakeCoordinatorInput {
 	activeSession: ReturnType<typeof makeActiveSession>
 	task: { taskId: string }
-	isClineFreeModel: () => Promise<boolean>
 	translation: {
-		messages: ClineMessage[]
+		messages: BedrockCoderMessage[]
 		sessionEnded: boolean
 		turnComplete: boolean
 		toolError?: boolean

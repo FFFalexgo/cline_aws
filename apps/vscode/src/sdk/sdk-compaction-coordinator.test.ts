@@ -1,9 +1,9 @@
-import { createContextCompactionPrepareTurn } from "@cline/core"
+import { createContextCompactionPrepareTurn } from "@bedrock-coder/core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { StateManager } from "@/core/storage/StateManager"
 import { SdkCompactionCoordinator, type SdkCompactionCoordinatorOptions } from "./sdk-compaction-coordinator"
 
-vi.mock("@cline/core", () => ({
+vi.mock("@bedrock-coder/core", () => ({
 	createContextCompactionPrepareTurn: vi.fn(),
 	createSessionCompactionState: vi.fn((input: { compactedMessages: unknown[] }) => ({
 		version: 1,
@@ -84,7 +84,7 @@ describe("SdkCompactionCoordinator", () => {
 		)
 	})
 
-	it("shows a skipped divider when the strategy declines to compact", async () => {
+	it("shows a skipped divider when the strategy debedrockCoders to compact", async () => {
 		const activeSession = makeActiveSession()
 		const { coordinator, options } = makeCoordinator({ activeSession })
 		mockCreateContextCompactionPrepareTurn.mockReturnValueOnce(vi.fn().mockResolvedValue(undefined))
@@ -222,9 +222,9 @@ interface MakeCoordinatorInput {
 function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 	const activeSession = "activeSession" in input ? input.activeSession : makeActiveSession()
 	const config = {
-		providerConfig: { providerId: "anthropic", modelId: "claude" },
-		providerId: "anthropic",
-		modelId: "claude",
+		providerConfig: { providerId: "bedrock", modelId: "anthropic.claude-sonnet-4-6" },
+		providerId: "bedrock",
+		modelId: "anthropic.claude-sonnet-4-6",
 		knownModels: undefined,
 		compaction: undefined,
 		logger: undefined,

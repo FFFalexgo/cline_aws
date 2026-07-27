@@ -5,12 +5,8 @@
 // The webview continues to communicate via gRPC; this layer translates
 // between gRPC handlers and SDK calls.
 
-export * from "./account-service"
-export * from "./auth-service"
-export * from "./cline-session-factory"
-export * from "./legacy-state-reader"
+export * from "./bedrock-coder-session-factory"
 export * from "./message-translator"
-export * from "./provider-migration"
 export { Controller } from "./SdkController"
 export * from "./sdk-followup-coordinator"
 export * from "./sdk-interaction-coordinator"
@@ -24,7 +20,6 @@ export * from "./sdk-session-lifecycle"
 export * from "./sdk-task-control-coordinator"
 export * from "./sdk-task-history"
 export * from "./sdk-task-start-coordinator"
-export * from "./sdk-tool-policies"
 export * from "./task-proxy"
 export * from "./vscode-runtime-builder"
 export * from "./vscode-session-host"

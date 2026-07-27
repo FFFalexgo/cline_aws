@@ -5,7 +5,7 @@
  * extensions, and results.
  *
  * ProviderConfig is left as `unknown` here so that shared stays
- * dependency-free of @cline/llms. Consuming packages narrow it
+ * dependency-free of @bedrock-coder/llms. Consuming packages narrow it
  * via re-exports. ModelInfo lives in shared (../llms/model-info)
  * and is used directly.
  */
@@ -33,7 +33,7 @@ import type {
 } from "../llms/tools";
 import { ToolCallRecordSchema } from "../llms/tools";
 import type { BasicLogger } from "../logging/logger";
-import type { ITelemetryService } from "../services/telemetry";
+import type { AgentMode } from "../session/runtime-config";
 import type { WorkspaceInfo } from "../session/workspace";
 
 // =============================================================================
@@ -297,13 +297,6 @@ export interface AgentHookRunStartContext {
 	userMessage: string;
 }
 
-export interface AgentHookScheduleContext {
-	scheduleId: string;
-	executionId?: string;
-	trigger: "scheduled" | "manual";
-	triggeredAt?: string;
-}
-
 /**
  * Workspace location fields shared by session-scoped and run-scoped contexts.
  *
@@ -329,7 +322,7 @@ export interface SessionWorkspaceEnv {
 	/**
 	 * Structured workspace and git metadata for the session.
 	 *
-	 * Contains the same information as the `{{CLINE_METADATA}}` block in the
+	 * Contains the same information as the `{{BEDROCK_CODER_METADATA}}` block in the
 	 * system prompt but in structured form: `rootPath`, `hint`,
 	 * `associatedRemoteUrls`, `latestGitCommitHash`, `latestGitBranchName`.
 	 *
@@ -348,7 +341,6 @@ export interface AgentHookSessionStartContext extends SessionWorkspaceEnv {
 	agentId: string;
 	conversationId: string;
 	parentAgentId: string | null;
-	schedule?: AgentHookScheduleContext;
 }
 
 /**
@@ -474,7 +466,6 @@ export interface AgentExtensionSessionStartContext extends SessionWorkspaceEnv {
 	agentId: string;
 	conversationId: string;
 	parentAgentId: string | null;
-	schedule?: AgentHookScheduleContext;
 }
 
 export interface AgentExtensionSessionShutdownContext {
@@ -671,24 +662,10 @@ export interface AgentConfig {
 	// Provider Settings
 	// -------------------------------------------------------------------------
 
-	/** Provider ID (e.g., "anthropic", "openai", "gemini") */
-	providerId: string;
+	/** Bedrock is the only inference provider. */
+	providerId: "bedrock";
 	/** Model ID to use */
 	modelId: string;
-	/** API key for the provider */
-	apiKey?: string;
-	/** Custom base URL for the API */
-	baseUrl?: string;
-	/** Additional headers for API requests */
-	headers?: Record<string, string>;
-	/**
-	 * Called when a run fails with an auth-like provider error (e.g. an OAuth
-	 * access token that expired mid-run). Hosts refresh credentials and push
-	 * the new key into the runtime via `updateConnection`; returning `true`
-	 * makes the runtime retry the failed run once with the refreshed
-	 * connection.
-	 */
-	onAuthError?: () => Promise<boolean>;
 	/** Optional provider model catalog overrides */
 	knownModels?: Record<string, ModelInfo>;
 	/** Optional pre-resolved provider configuration (includes provider-specific fields like aws/gcp). */
@@ -705,6 +682,8 @@ export interface AgentConfig {
 
 	/** System prompt for the agent */
 	systemPrompt: string;
+	/** Plan mode exposes read-only tools only. */
+	mode?: AgentMode;
 	/** Tools available to the agent */
 	tools: AgentTool[];
 	/**
@@ -787,16 +766,12 @@ export interface AgentConfig {
 	 */
 	hookErrorMode?: HookErrorMode;
 	/**
-	 * Optional schedule metadata for runs initiated by scheduler services.
-	 * Used by session_start lifecycle hooks.
-	 */
-	schedule?: AgentHookScheduleContext;
-	/**
-	 * Per-tool execution policy. Tool names not listed here default to enabled + autoApprove.
+	 * Per-tool execution policy. Tool names not listed here default to enabled.
+	 * State-changing tools always require explicit approval; policy values cannot bypass it.
 	 */
 	toolPolicies?: Record<string, ToolPolicy>;
 	/**
-	 * Optional callback to request client approval when a tool policy disables auto-approval.
+	 * Optional callback to request client approval for state-changing tools.
 	 */
 	requestToolApproval?: (
 		request: ToolApprovalRequest,
@@ -830,12 +805,8 @@ export interface AgentConfig {
 		| AgentPrepareTurnResult
 		| undefined;
 	/**
-	 * Optional Telemetry service for emitting structured events about agent execution to configured telemetry backends.
-	 */
-	telemetry?: ITelemetryService;
-	/**
-	 * Ambient runtime context: user identity, client surface, workspace, logger,
-	 * and telemetry. Threaded through to ProviderConfig so handlers can access it.
+	 * Ambient runtime context: client surface, workspace, and local logger.
+	 * Threaded through to ProviderConfig so handlers can access it.
 	 */
 	extensionContext?: ExtensionContext;
 
@@ -885,17 +856,15 @@ export interface AgentConfig {
 export const AgentConfigSchema = z.object({
 	sessionId: z.string().optional(),
 	// Provider Settings
-	providerId: z.string(),
+	providerId: z.literal("bedrock"),
 	modelId: z.string(),
-	apiKey: z.string().optional(),
-	baseUrl: z.string().url().optional(),
-	headers: z.record(z.string(), z.string()).optional(),
 	knownModels: z.record(z.string(), ModelInfoSchema).optional(),
 	providerConfig: z.unknown().optional(),
 	initialMessages: z.array(z.custom<Message>()).optional(),
 
 	// Agent Behavior
 	systemPrompt: z.string(),
+	mode: z.enum(["act", "plan"]).optional(),
 	tools: z.array(z.custom<AgentTool>()),
 	maxIterations: z.number().positive().optional(),
 	maxParallelToolCalls: z.number().int().positive().default(8),
@@ -944,7 +913,6 @@ export const AgentConfigSchema = z.object({
 			z.string(),
 			z.object({
 				enabled: z.boolean().optional(),
-				autoApprove: z.boolean().optional(),
 			}),
 		)
 		.optional(),
@@ -962,7 +930,6 @@ export const AgentConfigSchema = z.object({
 				policy: z
 					.object({
 						enabled: z.boolean().optional(),
-						autoApprove: z.boolean().optional(),
 					})
 					.default({}),
 			}),

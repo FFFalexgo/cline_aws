@@ -17,7 +17,7 @@ import path from "node:path"
  *  2. One process per file. `bun test` runs all files in a single process by
  *     default, so `mock.module(...)` registrations leak between files — suites
  *     mocking the same specifier with different shapes (e.g.
- *     `@/core/storage/StateManager`, `@cline/core`) clobber each other.
+ *     `@/core/storage/StateManager`, `@bedrock-coder/core`) clobber each other.
  *     `--parallel` runs each file in its own worker process, giving each a fresh
  *     module registry.
  *
@@ -31,13 +31,12 @@ import { Glob } from "bun"
 const INCLUDE_PATTERNS = [
 	"src/sdk/**/*.test.ts",
 	"src/shared/vsCodeSelectorUtils.test.ts",
-	"src/core/storage/remote-config/**/*.test.ts",
 	"src/shared/model-catalog/provider-helpers.test.ts",
 	"src/core/controller/models/__tests__/providerCatalogHandlers.test.ts",
 	"src/core/controller/models/__tests__/providerSwitchNormalization.test.ts",
 	"src/core/controller/models/__tests__/resolveModelInfo.test.ts",
 	"src/core/controller/models/__tests__/providerCatalogSmoke.test.ts",
-	"src/core/controller/models/__tests__/refreshClineRecommendedModels.test.ts",
+	"src/core/controller/models/__tests__/refreshBedrockCoderRecommendedModels.test.ts",
 ]
 
 const projectRoot = path.resolve(import.meta.dir, "..")

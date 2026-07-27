@@ -1,5 +1,5 @@
 /**
- * AgentRuntime contract types (ported from clinee `@cline/shared`).
+ * AgentRuntime contract types (ported from bedrockCodere `@bedrock-coder/shared`).
  *
  * These are the canonical type definitions consumed by `AgentRuntime`.
  *
@@ -12,11 +12,7 @@ import type {
 	ToolPolicy,
 } from "./llms/tools";
 import type { BasicLogger } from "./logging/logger";
-import type { ITelemetryService } from "./services/telemetry";
-
-// =============================================================================
-// Lightweight telemetry surface used by AgentRuntime
-// =============================================================================
+import type { AgentMode } from "./session/runtime-config";
 
 // =============================================================================
 // Message parts
@@ -408,13 +404,14 @@ export interface AgentRuntimeConfig {
 	/**
 	 * Agent conversation/transcript identifier.
 	 *
-	 * Used by the stateless agent loop, tools, hooks, telemetry, and model
+	 * Used by the stateless agent loop, tools, hooks, and model
 	 * history correlation. This id follows the current conversation store and
 	 * should not be used as the hub/session routing key.
 	 */
 	conversationId?: string;
 	parentAgentId?: string | null;
 	agentRole?: AgentRole;
+	mode?: AgentMode;
 	systemPrompt?: string;
 	messageModelInfo?: AgentMessage["modelInfo"];
 	model: AgentModel;
@@ -424,7 +421,6 @@ export interface AgentRuntimeConfig {
 	hooks?: Partial<AgentRuntimeHooks>;
 	plugins?: readonly AgentRuntimePlugin[];
 	logger?: BasicLogger;
-	telemetry?: ITelemetryService;
 	initialMessages?: readonly AgentMessage[];
 	maxIterations?: number;
 	completionPolicy?: {

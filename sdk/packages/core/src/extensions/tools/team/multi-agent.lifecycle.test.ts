@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentEvent } from "@cline/shared";
+import type { AgentConfig, AgentEvent } from "@bedrock-coder/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
 	AgentTeamsRuntime,
@@ -60,7 +60,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "python-poet",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Write concise Python-focused haiku",
 				tools: [],
@@ -97,7 +97,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "python-poet",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Write concise Python-focused haiku",
 				maxIterations: 7,
@@ -138,7 +138,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "python-poet",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Write concise Python-focused haiku",
 				maxIterations: 7,
@@ -186,7 +186,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "python-poet",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Write concise Python-focused haiku",
 				tools: [],
@@ -242,7 +242,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "python-poet",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Write concise Python-focused haiku",
 				tools: [],
@@ -303,7 +303,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "alice",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Helper teammate",
 				tools: [],
@@ -374,7 +374,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "bob",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Helper teammate",
 				tools: [],
@@ -414,7 +414,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "charlie",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Helper teammate",
 				tools: [],
@@ -470,7 +470,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "diana",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Helper teammate",
 				tools: [],
@@ -528,7 +528,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		runtime.spawnTeammate({
 			agentId: "providers-investigator",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Investigate providers thoroughly",
 				tools: [],
@@ -557,7 +557,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 		);
 	});
 
-	it("honors pending retry backoff when recovering queued runs", async () => {
+	it("marks queued runs interrupted on recovery without replaying them", async () => {
 		vi.useFakeTimers();
 		try {
 			const runMock = vi.fn(async (_message: string) => ({
@@ -592,7 +592,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 			originalRuntime.spawnTeammate({
 				agentId: "alice",
 				config: {
-					providerId: "anthropic",
+					providerId: "bedrock",
 					modelId: "claude-sonnet-4-5-20250929",
 					systemPrompt: "Helper teammate",
 					tools: [],
@@ -621,7 +621,7 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 			recoveredRuntime.spawnTeammate({
 				agentId: "alice",
 				config: {
-					providerId: "anthropic",
+					providerId: "bedrock",
 					modelId: "claude-sonnet-4-5-20250929",
 					systemPrompt: "Helper teammate",
 					tools: [],
@@ -630,21 +630,128 @@ describe("AgentTeamsRuntime teammate lifecycle events", () => {
 
 			const recovered = recoveredRuntime.recoverActiveRuns("runtime_recovered");
 			expect(recovered).toHaveLength(1);
-			expect(recovered[0].nextAttemptAt).toEqual(retryAt);
+			expect(recovered[0]).toMatchObject({
+				status: "interrupted",
+				error: "runtime_recovered",
+			});
 			expect(runMock).not.toHaveBeenCalled();
 
-			await vi.advanceTimersByTimeAsync(4999);
+			await vi.advanceTimersByTimeAsync(10_000);
 			expect(runMock).not.toHaveBeenCalled();
-
-			await vi.advanceTimersByTimeAsync(1);
-			expect(runMock).toHaveBeenCalledTimes(1);
-			expect(runMock.mock.calls[0][0]).toContain(
-				"This is an automatic recovery of interrupted team run",
-			);
-			expect(runMock.mock.calls[0][0]).toContain("Complete work");
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("keeps excess teammate runs visible in the configured concurrency queue", async () => {
+		let releaseFirst: (() => void) | undefined;
+		const firstRun = vi.fn(
+			() =>
+				new Promise<{
+					text: string;
+					iterations: number;
+					finishReason: "end_turn";
+					durationMs: number;
+					usage: {
+						inputTokens: number;
+						outputTokens: number;
+						cacheReadTokens: number;
+						cacheWriteTokens: number;
+						totalCost: number;
+					};
+					messages: [];
+				}>((resolve) => {
+					releaseFirst = () =>
+						resolve({
+							text: "first complete",
+							iterations: 1,
+							finishReason: "end_turn",
+							durationMs: 10,
+							usage: {
+								inputTokens: 1,
+								outputTokens: 1,
+								cacheReadTokens: 0,
+								cacheWriteTokens: 0,
+								totalCost: 0,
+							},
+							messages: [],
+						});
+				}),
+		);
+		const secondRun = vi.fn(async () => ({
+			text: "second complete",
+			iterations: 1,
+			finishReason: "end_turn" as const,
+			durationMs: 10,
+			usage: {
+				inputTokens: 1,
+				outputTokens: 1,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				totalCost: 0,
+			},
+			messages: [],
+		}));
+		createSessionRuntimeMock
+			// biome-ignore lint/complexity/useArrowFunction: `new SessionRuntime(...)` requires a non-arrow callable.
+			.mockImplementationOnce(function () {
+				return {
+					abort: vi.fn(),
+					run: firstRun,
+					continue: vi.fn(),
+					canStartRun: vi.fn(() => true),
+					getAgentId: vi.fn(() => "alice"),
+					getConversationId: vi.fn(() => "conv-alice"),
+					getMessages: vi.fn(() => []),
+					subscribeEvents: vi.fn(() => () => {}),
+				};
+			})
+			// biome-ignore lint/complexity/useArrowFunction: `new SessionRuntime(...)` requires a non-arrow callable.
+			.mockImplementationOnce(function () {
+				return {
+					abort: vi.fn(),
+					run: secondRun,
+					continue: vi.fn(),
+					canStartRun: vi.fn(() => true),
+					getAgentId: vi.fn(() => "bob"),
+					getConversationId: vi.fn(() => "conv-bob"),
+					getMessages: vi.fn(() => []),
+					subscribeEvents: vi.fn(() => () => {}),
+				};
+			});
+
+		const runtime = new AgentTeamsRuntime({
+			teamName: "test-team",
+			maxConcurrentRuns: 1,
+		});
+		for (const agentId of ["alice", "bob"]) {
+			runtime.spawnTeammate({
+				agentId,
+				config: {
+					providerId: "bedrock",
+					modelId: "claude-sonnet-4-5-20250929",
+					systemPrompt: `Helper teammate ${agentId}`,
+					tools: [],
+				},
+			});
+		}
+
+		const first = runtime.startTeammateRun("alice", "first task");
+		const second = runtime.startTeammateRun("bob", "second task");
+		expect(runtime.getRun(first.id)?.status).toBe("running");
+		expect(runtime.getRun(second.id)?.status).toBe("queued");
+		expect(runtime.getBoardSnapshot().runs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: first.id, status: "running" }),
+				expect.objectContaining({ id: second.id, status: "queued" }),
+			]),
+		);
+
+		releaseFirst?.();
+		await runtime.awaitRun(first.id, 1);
+		const completedSecond = await runtime.awaitRun(second.id, 1);
+		expect(secondRun).toHaveBeenCalledTimes(1);
+		expect(completedSecond.status).toBe("completed");
 	});
 });
 
@@ -656,7 +763,7 @@ describe("AgentTeamsRuntime run failure reporting", () => {
 			return {
 				abort: vi.fn(),
 				run: vi.fn(async () => ({
-					text: "Unauthorized: Please re-authenticate your Cline account.",
+					text: "Bedrock request failed after retries.",
 					iterations: 8,
 					finishReason: "error",
 					durationMs: 100,
@@ -685,7 +792,7 @@ describe("AgentTeamsRuntime run failure reporting", () => {
 		runtime.spawnTeammate({
 			agentId: "alice",
 			config: {
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-5-20250929",
 				systemPrompt: "Helper teammate",
 				tools: [],
@@ -696,7 +803,7 @@ describe("AgentTeamsRuntime run failure reporting", () => {
 		const settledRun = await runtime.awaitRun(run.id, 1);
 
 		expect(settledRun.status).toBe("failed");
-		expect(settledRun.error).toContain("Unauthorized");
+		expect(settledRun.error).toContain("Bedrock request failed");
 		expect(events).toContainEqual(
 			expect.objectContaining({
 				type: TeamMessageType.RunFailed,

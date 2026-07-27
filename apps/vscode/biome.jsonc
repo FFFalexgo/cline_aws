@@ -170,7 +170,6 @@
 				"!!**/*.mts",
 				"!!**/webview-ui/**",
 				"!!**/evals/**",
-				"!!**/standalone/**",
 				"!!**/cli/**",
 				"!!**/e2e/**",
 				"!!**/test/**",
@@ -181,8 +180,7 @@
 				"!!**/*.mjs",
 				"!!**/*.js",
 				"!!**/scripts/**",
-				"!!**/*.tsx",
-				"!!**/testing-platform/**"
+				"!!**/*.tsx"
 			]
 		},
 		{
@@ -192,7 +190,6 @@
 				"!!src/core/storage/FileContextTracker.ts",
 				"!!src/core/context/context-tracking/FileContextTracker.ts",
 				"!!src/common.ts",
-				"!!src/services/logging/distinctId.ts",
 				"!!src/core/storage/utils/state-helpers.ts",
 				"!!src/extension.ts"
 			],

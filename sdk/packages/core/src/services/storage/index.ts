@@ -1,10 +1,5 @@
 export type { ArtifactStore } from "./artifact-store";
-export {
-	type MigrateLegacyProviderSettingsOptions,
-	type MigrateLegacyProviderSettingsResult,
-	migrateLegacyProviderSettings,
-} from "./provider-settings-legacy-migration";
-export { ProviderSettingsManager } from "./provider-settings-manager";
+export { BedrockSettingsStore } from "./bedrock-settings-store";
 export type { SessionStore } from "./session-store";
 export { SqliteSessionStore } from "./sqlite-session-store";
 export type { TeamStore } from "./team-store";

@@ -1,9 +1,4 @@
-import type { BasicLogger, ITelemetryService } from "@cline/shared";
-import type { CronServiceOptions } from "../../cron/service/cron-service";
-import type {
-	HubScheduleRuntimeHandlers,
-	HubScheduleServiceOptions,
-} from "../../cron/service/schedule-service";
+import type { BasicLogger } from "@bedrock-coder/shared";
 import type {
 	PendingPromptsRuntimeService,
 	RuntimeHost,
@@ -18,16 +13,6 @@ export interface HubWebSocketServerOptions {
 	owner?: HubOwnerContext;
 	sessionHost?: RuntimeHost & Partial<PendingPromptsRuntimeService>;
 	settingsService?: CoreSettingsService;
-	runtimeHandlers: HubScheduleRuntimeHandlers;
-	scheduleOptions?: Omit<HubScheduleServiceOptions, "runtimeHandlers">;
-	/**
-	 * File-based cron automation options. When provided, the hub starts a
-	 * `CronService` that watches global `~/.cline/cron/` by default, reconciles
-	 * specs into `cron.db`, and executes queued runs through `runtimeHandlers`.
-	 * Pass `cronOptions.specs` to use a different source, including future
-	 * workspace-scoped specs.
-	 */
-	cronOptions?: Omit<CronServiceOptions, "runtimeHandlers">;
 	/**
 	 * Custom `fetch` implementation forwarded to the internally-constructed
 	 * `LocalRuntimeHost` that executes incoming `session.create` traffic.
@@ -37,12 +22,6 @@ export interface HubWebSocketServerOptions {
 	 * Ignored when `sessionHost` is supplied — in that case the caller owns
 	 * runtime construction and is responsible for wiring its own fetch.
 	 */
-	fetch?: typeof fetch;
-	/**
-	 * Telemetry forwarded to the internally-constructed `LocalRuntimeHost`.
-	 * Ignored when `sessionHost` is supplied.
-	 */
-	telemetry?: ITelemetryService;
 	/**
 	 * Structured logger forwarded to the internally-constructed local runtime.
 	 * Ignored when `sessionHost` is supplied.

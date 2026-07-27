@@ -3,20 +3,10 @@
  *
  * Zod schemas and inferred types for model capabilities, pricing,
  * and metadata. These live in shared so that agent types can reference
- * ModelInfo without depending on @cline/llms.
+ * ModelInfo without depending on @bedrock-coder/llms.
  */
 
 import { z } from "zod";
-
-export const ApiFormatSchema = z.enum(["default", "openai-responses", "r1"]);
-
-export type ApiFormat = z.infer<typeof ApiFormatSchema>;
-
-export const ApiFormat = {
-	DEFAULT: "default" as const,
-	OPENAI_RESPONSES: "openai-responses" as const,
-	R1: "r1" as const,
-} as const;
 
 export const ModelCapabilitySchema = z.enum([
 	"images",
@@ -77,7 +67,6 @@ export const ModelInfoSchema = z.object({
 	contextWindow: z.number().optional(),
 	maxInputTokens: z.number().optional(),
 	capabilities: z.array(ModelCapabilitySchema).optional(),
-	apiFormat: ApiFormatSchema.optional(),
 	systemRole: z.enum(["system", "developer"]).optional(),
 	temperature: z.number().optional(),
 	pricing: ModelPricingSchema.optional(),

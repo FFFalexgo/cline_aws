@@ -1,5 +1,5 @@
-import { createDefaultShellExecutor, createMcpTools } from "@cline/core"
-import { type AgentTool, type AgentToolContext, createTool } from "@cline/shared"
+import { createDefaultShellExecutor, createMcpTools } from "@bedrock-coder/core"
+import { type AgentTool, type AgentToolContext, createTool } from "@bedrock-coder/shared"
 import type { VscodeTerminalManager } from "@/hosts/vscode/terminal/VscodeTerminalManager"
 import type { McpHub } from "@/services/mcp/McpHub"
 import { Logger } from "@/shared/services/Logger"
@@ -95,7 +95,7 @@ function createAttemptCompletionTool(options: { cwd?: string } = {}): AgentTool 
 
 			// Execute the command and include its output in the result
 			const cwd = options.cwd || process.cwd()
-			Logger.log(`[attempt_completion] Executing command: ${command} (cwd: ${cwd})`)
+			Logger.log("[attempt_completion] Executing an approved completion command")
 
 			try {
 				const shellExecutor = getCompletionCommandExecutor()

@@ -9,9 +9,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type * as LlmsProviders from "@cline/llms";
-import type { AgentResult } from "@cline/shared";
-import { setClineDir, setHomeDir } from "@cline/shared/storage";
+import type * as LlmsProviders from "@bedrock-coder/llms";
+import type { AgentResult } from "@bedrock-coder/shared";
+import { setBedrockCoderDir, setHomeDir } from "@bedrock-coder/shared/storage";
 import { nanoid } from "nanoid";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionManifest } from "../../session/models/session-manifest";
@@ -218,7 +218,7 @@ class LocalFileSessionService {
 describe("LocalRuntimeHost e2e", () => {
 	const envSnapshot = {
 		HOME: process.env.HOME,
-		CLINE_DIR: process.env.CLINE_DIR,
+		BEDROCK_CODER_DIR: process.env.BEDROCK_CODER_DIR,
 	};
 	const tempDirs: string[] = [];
 	let isolatedHomeDir = "";
@@ -226,16 +226,16 @@ describe("LocalRuntimeHost e2e", () => {
 	beforeEach(() => {
 		isolatedHomeDir = mkdtempSync(join(tmpdir(), "core-session-home-"));
 		process.env.HOME = isolatedHomeDir;
-		process.env.CLINE_DIR = join(isolatedHomeDir, ".cline");
+		process.env.BEDROCK_CODER_DIR = join(isolatedHomeDir, ".bedrock-coder");
 		setHomeDir(isolatedHomeDir);
-		setClineDir(process.env.CLINE_DIR);
+		setBedrockCoderDir(process.env.BEDROCK_CODER_DIR);
 	});
 
 	afterEach(() => {
 		process.env.HOME = envSnapshot.HOME;
-		process.env.CLINE_DIR = envSnapshot.CLINE_DIR;
+		process.env.BEDROCK_CODER_DIR = envSnapshot.BEDROCK_CODER_DIR;
 		setHomeDir(envSnapshot.HOME ?? "~");
-		setClineDir(envSnapshot.CLINE_DIR ?? join("~", ".cline"));
+		setBedrockCoderDir(envSnapshot.BEDROCK_CODER_DIR ?? join("~", ".bedrock-coder"));
 		for (const dir of tempDirs.splice(0)) {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -296,7 +296,6 @@ describe("LocalRuntimeHost e2e", () => {
 		const agentShutdown = vi.fn().mockResolvedValue(undefined);
 
 		const manager = new RuntimeHostUnderTest({
-			distinctId: `test-${nanoid(5)}`,
 			sessionService: sessionService as never,
 			runtimeBuilder: runtimeBuilder as never,
 			createAgent: () =>
@@ -321,9 +320,8 @@ describe("LocalRuntimeHost e2e", () => {
 		const started = await manager.startSession({
 			interactive: true,
 			...splitCoreSessionConfig({
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-6",
-				apiKey: "test-key",
 				cwd: sessionsDir,
 				systemPrompt: "You are a test agent",
 				mode: "act",
@@ -468,7 +466,6 @@ describe("LocalRuntimeHost e2e", () => {
 		);
 
 		const manager = new RuntimeHostUnderTest({
-			distinctId: `test-${nanoid(5)}`,
 			sessionService: sessionService as never,
 			runtimeBuilder: runtimeBuilder as never,
 			createAgent: () =>
@@ -491,9 +488,8 @@ describe("LocalRuntimeHost e2e", () => {
 		const started = await manager.startSession({
 			interactive: false,
 			...splitCoreSessionConfig({
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "claude-sonnet-4-6",
-				apiKey: "test-key",
 				cwd: sessionsDir,
 				systemPrompt: "You are a test agent",
 				mode: "act",

@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
-import type { AgentConfig, AgentTool } from "@cline/shared";
+import type { AgentConfig, AgentTool } from "@bedrock-coder/shared";
 import { resolveAgentPluginPaths } from "../extensions/plugin/plugin-config-loader";
 import type {
 	PluginInitializationFailure,
@@ -11,7 +11,7 @@ import { resolveDisabledToolNames } from "./global-settings";
 
 type AgentExtension = NonNullable<AgentConfig["extensions"]>[number];
 type AgentExtensionApi = Parameters<NonNullable<AgentExtension["setup"]>>[0];
-type AgentExtensionWithPath = AgentExtension & { __clinePluginPath?: string };
+type AgentExtensionWithPath = AgentExtension & { __bedrockCoderPluginPath?: string };
 
 function isPathWithin(parentPath: string, childPath: string): boolean {
 	const relativePath = relative(resolve(parentPath), resolve(childPath));
@@ -130,7 +130,6 @@ async function collectPluginContributions(
 		registerMessageBuilder: () => {},
 		registerRule: () => {},
 		registerProvider: () => {},
-		registerAutomationEventType: () => {},
 		registerMcpServer: (_server) => {
 			if (!extension.manifest.capabilities.includes("mcp")) {
 				throw new Error('registerMcpServer requires the "mcp" capability');
@@ -190,7 +189,7 @@ export async function listPluginToolsWithDiagnostics(input: {
 		warnings = [...sandboxed.warnings];
 		for (const extension of sandboxed.extensions ?? []) {
 			const pluginPath = (extension as AgentExtensionWithPath)
-				.__clinePluginPath;
+				.__bedrockCoderPluginPath;
 			if (!pluginPath) {
 				continue;
 			}

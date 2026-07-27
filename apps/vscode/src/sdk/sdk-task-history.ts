@@ -1,21 +1,14 @@
 import path from "node:path"
-import type { ClineCoreListHistoryOptions, SessionHistoryRecord } from "@cline/core"
-import type { Message as SdkMessage } from "@cline/llms"
-import { formatDisplayUserInput } from "@cline/shared"
-import type { ClineMessage } from "@shared/ExtensionMessage"
+import type { BedrockCoderCoreListHistoryOptions, SessionHistoryRecord } from "@bedrock-coder/core"
+import type { Message as SdkMessage } from "@bedrock-coder/llms"
+import { formatDisplayUserInput } from "@bedrock-coder/shared"
+import type { BedrockCoderMessage } from "@shared/ExtensionMessage"
 import type { HistoryItem } from "@shared/HistoryItem"
 import getFolderSize from "get-folder-size"
 import type { McpHub } from "@/services/mcp/McpHub"
-import type { TelemetryService } from "@/services/telemetry/TelemetryService"
 import { Logger } from "@/shared/services/Logger"
-import { deleteLegacyTask, readApiConversationHistory, readTaskHistory, readUiMessages, taskDirPath } from "./legacy-state-reader"
-import {
-	appendLegacyResumeWarning,
-	legacyApiHistoryToSdkMessages,
-	mergeLegacyUiMessagesWithResumedSdkMessages,
-} from "./legacy-task-handling"
 import type { MessageIdMinter } from "./message-id-minter"
-import { sdkMessagesToClineMessages } from "./message-translator"
+import { sdkMessagesToBedrockCoderMessages } from "./message-translator"
 import type { SdkSessionLifecycle } from "./sdk-session-lifecycle"
 import type { VscodeSessionHost } from "./vscode-session-host"
 
@@ -31,19 +24,13 @@ export interface SdkTaskHistoryOptions {
 	mcpHub: McpHub
 	sessions: SdkSessionLifecycle
 	/**
-	 * VS Code's legacy global storage root. Pre-SDK VS Code tasks lived here under
-	 * state/taskHistory.json and tasks/<id>/ instead of ~/.cline/data.
-	 */
-	legacyExtensionStorageDir?: string
-	/**
 	 * The process-wide id/seq/epoch authority. When provided, history rendering mints ids from
 	 * it so regenerated history ids never overlap live-session ids. Optional for tests.
 	 */
 	getMinter?: () => MessageIdMinter
-	telemetry?: TelemetryService
 }
 
-type SdkTaskHistoryListOptions = ClineCoreListHistoryOptions & {
+type SdkTaskHistoryListOptions = BedrockCoderCoreListHistoryOptions & {
 	offset?: number
 }
 
@@ -87,6 +74,7 @@ function compareSessionHistoryRecordsByRecencyDesc(a: SessionHistoryRecord, b: S
 
 export function historyItemToSessionMetadata(item: HistoryItem, fallbackModelId?: string): Record<string, unknown> {
 	return {
+		schemaVersion: 2,
 		title: item.task,
 		isFavorited: item.isFavorited ?? false,
 		size: item.size ?? 0,
@@ -96,36 +84,6 @@ export function historyItemToSessionMetadata(item: HistoryItem, fallbackModelId?
 		cacheWrites: item.cacheWrites ?? 0,
 		cacheReads: item.cacheReads ?? 0,
 		modelId: item.modelId ?? fallbackModelId ?? "",
-		legacyTask: item.isLegacy ?? false,
-	}
-}
-
-function historyItemToSessionHistoryRecord(item: HistoryItem): SessionHistoryRecord {
-	const startedAt = new Date(item.ts || Date.now()).toISOString()
-	const displayTask = formatDisplayUserInput(item.task)
-	return {
-		sessionId: item.id,
-		source: "vscode",
-		pid: 0,
-		startedAt,
-		endedAt: startedAt,
-		exitCode: 0,
-		status: "completed",
-		interactive: true,
-		provider: "",
-		model: item.modelId ?? "",
-		cwd: item.cwdOnTaskInitialization ?? "",
-		workspaceRoot: item.cwdOnTaskInitialization ?? "",
-		enableTools: true,
-		enableSpawn: false,
-		enableTeams: false,
-		isSubagent: false,
-		prompt: displayTask,
-		metadata: {
-			...historyItemToSessionMetadata({ ...item, task: displayTask }),
-			legacyTask: true,
-		},
-		updatedAt: startedAt,
 	}
 }
 
@@ -166,8 +124,7 @@ export function sessionHistoryRecordToHistoryItem(item: SessionHistoryRecord): H
 		isFavorited: metadataBoolean(metadata, "isFavorited") ?? metadataBoolean(metadata, "is_favorited") ?? false,
 		modelId: item.model || metadataString(metadata, "modelId") || "",
 		cwdOnTaskInitialization: item.cwd ?? item.workspaceRoot,
-		isLegacy:
-			metadataBoolean(metadata, "legacyTask") === true || metadataBoolean(metadata, "migratedFromLegacyTask") === true,
+		isLegacy: false,
 	}
 }
 
@@ -186,37 +143,6 @@ export class SdkTaskHistory {
 	private readonly metadataHistoryCacheTtlMs = 10_000
 
 	constructor(private readonly options: SdkTaskHistoryOptions) {}
-
-	private getLegacyDataDirs(): (string | undefined)[] {
-		const dirs: (string | undefined)[] = [undefined]
-		const extensionStorageDir = this.options.legacyExtensionStorageDir?.trim()
-		if (extensionStorageDir) {
-			dirs.push(extensionStorageDir)
-		}
-		return dirs
-	}
-
-	private readAllLegacyTaskHistory(): {
-		item: HistoryItem
-		dataDir?: string
-	}[] {
-		const seenIds = new Set<string>()
-		const tasks: { item: HistoryItem; dataDir?: string }[] = []
-		for (const dataDir of this.getLegacyDataDirs()) {
-			for (const item of readTaskHistory(dataDir)) {
-				if (!item.id || seenIds.has(item.id)) {
-					continue
-				}
-				seenIds.add(item.id)
-				tasks.push({ item, dataDir })
-			}
-		}
-		return tasks
-	}
-
-	private findLegacyTask(taskId: string): { item: HistoryItem; dataDir?: string } | undefined {
-		return this.readAllLegacyTaskHistory().find(({ item }) => item.id === taskId)
-	}
 
 	private getActiveHistoryHost(): VscodeSessionHost | undefined {
 		const sdkHost = this.options.sessions.getActiveSession()?.sdkHost
@@ -373,7 +299,7 @@ export class SdkTaskHistory {
 			return result
 		}
 
-		const hostOptions: ClineCoreListHistoryOptions = { ...options }
+		const hostOptions: BedrockCoderCoreListHistoryOptions = { ...options }
 		delete (hostOptions as { offset?: number }).offset
 
 		const sdkHistory = await this.withHistoryHost((host) =>
@@ -384,35 +310,16 @@ export class SdkTaskHistory {
 			}),
 		)
 		const visibleSdkHistory = sdkHistory.filter((item) => item.isSubagent !== true)
-		const sdkIds = new Set(visibleSdkHistory.map((item) => item.sessionId))
-		const legacyHistory = this.readAllLegacyTaskHistory()
-			.filter(({ item }) => item.task && !sdkIds.has(item.id))
-			.map(({ item }) => historyItemToSessionHistoryRecord(item))
-		const migratedSdkTaskCount = visibleSdkHistory.filter(
-			(item) => metadataBoolean(item.metadata, "migratedFromLegacyTask") === true,
-		).length
-
-		const mergedHistory = [...visibleSdkHistory, ...legacyHistory].sort(compareSessionHistoryRecordsByRecencyDesc)
+		const orderedHistory = visibleSdkHistory.sort(compareSessionHistoryRecordsByRecencyDesc)
 		if (useCache) {
 			this.metadataHistoryCache = {
-				records: mergedHistory,
+				records: orderedHistory,
 				hostLimit,
 				createdAt: Date.now(),
 			}
 		}
 
-		this.options.telemetry?.safeCapture(
-			() =>
-				this.options.telemetry?.captureLegacyTaskMigrationBacklog({
-					pendingLegacyTaskCount: legacyHistory.length,
-					migratedSdkTaskCount,
-					visibleSdkTaskCount: visibleSdkHistory.length,
-					visibleTaskCount: mergedHistory.length,
-				}),
-			"SdkTaskHistory.listHistory.legacyMigrationBacklog",
-		)
-
-		const result = mergedHistory.slice(offset, offset + limit)
+		const result = orderedHistory.slice(offset, offset + limit)
 		return result
 	}
 
@@ -420,55 +327,13 @@ export class SdkTaskHistory {
 		return this.withHistoryHost((host) => host.get(taskId) as Promise<SessionHistoryRecord | undefined>)
 	}
 
-	async getClineMessages(taskId: string): Promise<ClineMessage[]> {
-		const sdkRecord = await this.getSdkRecord(taskId)
-		const legacyTask = this.findLegacyTask(taskId)
-		if (!sdkRecord && legacyTask) {
-			return readUiMessages(taskId, legacyTask.dataDir)
-		}
-
+	async getBedrockCoderMessages(taskId: string): Promise<BedrockCoderMessage[]> {
 		const sdkMessages = await this.withHistoryHost((host) => host.readMessages(taskId) as Promise<SdkMessage[]>)
-		const clineMessages = sdkMessagesToClineMessages(
-			sanitizeSdkUserMessagesForDisplay(sdkMessages),
-			this.options.getMinter?.(),
-		)
-		if (sdkRecord && legacyTask) {
-			return mergeLegacyUiMessagesWithResumedSdkMessages(readUiMessages(taskId, legacyTask.dataDir), clineMessages)
-		}
-		return clineMessages
+		return sdkMessagesToBedrockCoderMessages(sanitizeSdkUserMessagesForDisplay(sdkMessages), this.options.getMinter?.())
 	}
 
-	async isLegacyTask(taskId: string): Promise<boolean> {
-		const sdkRecord = await this.getSdkRecord(taskId)
-		if (sdkRecord) {
-			return (
-				metadataBoolean(sdkRecord.metadata, "legacyTask") === true ||
-				metadataBoolean(sdkRecord.metadata, "migratedFromLegacyTask") === true
-			)
-		}
-
-		return this.findLegacyTask(taskId) !== undefined
-	}
-
-	async getLegacyResumeInitialMessages(taskId: string, fallbackMessages?: unknown[]): Promise<unknown[] | undefined> {
-		const sdkRecord = await this.getSdkRecord(taskId)
-		const legacyTask = sdkRecord ? undefined : this.findLegacyTask(taskId)
-		if (legacyTask) {
-			const legacyApiHistory = readApiConversationHistory(taskId, legacyTask.dataDir)
-			if (legacyApiHistory.length > 0) {
-				return legacyApiHistoryToSdkMessages(legacyApiHistory, legacyTask.item)
-			}
-		}
-
-		if (!fallbackMessages) {
-			return undefined
-		}
-		return appendLegacyResumeWarning(fallbackMessages as { role: string; content: unknown }[])
-	}
-
-	getLegacyTaskDirPath(taskId: string): string | undefined {
-		const legacyTask = this.findLegacyTask(taskId)
-		return legacyTask ? taskDirPath(taskId, legacyTask.dataDir) : undefined
+	async getSessionRecord(taskId: string): Promise<SessionHistoryRecord | undefined> {
+		return this.getSdkRecord(taskId)
 	}
 
 	private async updateSession(sessionId: string, item: HistoryItem): Promise<void> {
@@ -518,20 +383,9 @@ export class SdkTaskHistory {
 	}
 
 	private async deleteSession(sessionId: string): Promise<void> {
-		const legacyTask = this.findLegacyTask(sessionId)
-		try {
-			await this.withHistoryHost(async (host) => {
-				await host.delete(sessionId)
-			})
-		} catch (error) {
-			if (!legacyTask) {
-				throw error
-			}
-			Logger.warn(`[SdkTaskHistory] SDK session missing while deleting legacy task: ${sessionId}`, error)
-		}
-		if (legacyTask) {
-			deleteLegacyTask(sessionId, legacyTask.dataDir)
-		}
+		await this.withHistoryHost(async (host) => {
+			await host.delete(sessionId)
+		})
 		this.invalidateMetadataHistoryCache()
 	}
 
@@ -546,12 +400,7 @@ export class SdkTaskHistory {
 			historyItem.size = await this.getCachedTaskSize(host, sdkRecord as SessionHistoryRecord)
 			return historyItem
 		})
-		if (sdkHistoryItem) {
-			return sdkHistoryItem
-		}
-
-		const legacyItem = this.findLegacyTask(taskId)?.item
-		return legacyItem ? { ...legacyItem, isLegacy: true } : undefined
+		return sdkHistoryItem
 	}
 
 	async deleteTaskFromState(id: string): Promise<HistoryItem[]> {

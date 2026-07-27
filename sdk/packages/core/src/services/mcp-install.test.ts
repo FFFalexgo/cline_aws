@@ -8,11 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	buildMcpInstallTransport,
-	installMcpServer,
-	parseMcpInstallArgs,
-} from "./mcp-install";
+import { buildMcpInstallTransport, installMcpServer } from "./mcp-install";
 
 describe("MCP install service", () => {
 	let root = "";
@@ -59,7 +55,7 @@ describe("MCP install service", () => {
 	});
 
 	it("installs remote MCP servers with headers into the settings file", () => {
-		const settingsPath = join(root, "cline_mcp_settings.json");
+		const settingsPath = join(root, "mcp_settings.json");
 		const result = installMcpServer({
 			name: "docs",
 			transport: "http",
@@ -88,28 +84,6 @@ describe("MCP install service", () => {
 		});
 	});
 
-	it("parses marketplace-style MCP install args in core", () => {
-		expect(
-			parseMcpInstallArgs([
-				"docs",
-				"--transport=http",
-				"https://example.com/mcp",
-				"--header",
-				"Authorization: Bearer <token>",
-				"--header=X-Extra: yes",
-			]),
-		).toEqual({
-			name: "docs",
-			transport: "http",
-			targetArgs: ["https://example.com/mcp"],
-			headers: ["Authorization: Bearer <token>", "X-Extra: yes"],
-		});
-
-		expect(() => parseMcpInstallArgs([])).toThrow(
-			/Marketplace MCP install args/,
-		);
-	});
-
 	it("keeps transport-like values as stdio command args for direct builder input", () => {
 		expect(
 			buildMcpInstallTransport({
@@ -124,7 +98,7 @@ describe("MCP install service", () => {
 	});
 
 	it("preserves existing MCP settings while adding a server", () => {
-		const settingsPath = join(root, "cline_mcp_settings.json");
+		const settingsPath = join(root, "mcp_settings.json");
 		writeFileSync(
 			settingsPath,
 			JSON.stringify(
@@ -193,7 +167,7 @@ describe("MCP install service", () => {
 				name: "fs",
 				settingsPath,
 			}),
-		).toThrow(/requires a command/);
+		).toThrow(/requires an explicit local command/);
 		expect(() =>
 			installMcpServer({
 				name: "bad",

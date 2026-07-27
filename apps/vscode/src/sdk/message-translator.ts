@@ -1,48 +1,49 @@
 // Replaces classic message streaming from src/core/task/index.ts (see origin/main)
 //
-// Translates SDK session events into ClineMessage[] for webview consumption.
-// The webview expects ClineMessage objects with ask/say types; this module
+// Translates SDK session events into BedrockCoderMessage[] for webview consumption.
+// The webview expects BedrockCoderMessage objects with ask/say types; this module
 // maps SDK CoreSessionEvent and AgentEvent types to that format.
 //
 // Key mappings:
-// - SDK "chunk" event (agent stream) → ClineMessage say="text" with partial=true
-// - SDK "agent_event" content_start (text) → ClineMessage say="text" with partial=true
-// - SDK "agent_event" content_start (reasoning) → ClineMessage say="reasoning" with partial=true
-// - SDK "agent_event" content_start (tool) → ClineMessage say="tool" with partial=true
+// - SDK "chunk" event (agent stream) → BedrockCoderMessage say="text" with partial=true
+// - SDK "agent_event" content_start (text) → BedrockCoderMessage say="text" with partial=true
+// - SDK "agent_event" content_start (reasoning) → BedrockCoderMessage say="reasoning" with partial=true
+// - SDK "agent_event" content_start (tool) → BedrockCoderMessage say="tool" with partial=true
 //   IMPORTANT: The webview's ChatRow.tsx parses message.text as JSON when
-//   say==="tool", expecting ClineSayTool format: {tool, path, content, ...}.
+//   say==="tool", expecting BedrockCoderSayTool format: {tool, path, content, ...}.
 //   We must convert SDK tool names (read_files, editor, run_commands, etc.)
 //   and their inputs to this format.
-// - SDK "agent_event" content_start (tool: MCP) → ClineMessage say="use_mcp_server" with partial=true
+// - SDK "agent_event" content_start (tool: MCP) → BedrockCoderMessage say="use_mcp_server" with partial=true
 //   MCP tools use serverName__toolName naming convention. The webview renders
-//   MCP tool calls via say/ask="use_mcp_server" with ClineAskUseMcpServer JSON.
+//   MCP tool calls via say/ask="use_mcp_server" with BedrockCoderAskUseMcpServer JSON.
 // - SDK "agent_event" content_end (tool: MCP) → say="use_mcp_server" + say="mcp_server_response"
-// - SDK "agent_event" content_end → ClineMessage with partial=false
-// - SDK "agent_event" content_start (tool: attempt_completion) → ClineMessage say="completion_result"
-// - SDK "agent_event" content_end (tool: attempt_completion) → ClineMessage say="completion_result" (final)
-// - SDK "agent_event" done → ClineMessage ask="completion_result" (always; must be last message)
-// - SDK "agent_event" error → ClineMessage say="error"
-// - SDK "agent_event" usage → ClineMessage say="api_req_started" with ClineApiReqInfo JSON
+// - SDK "agent_event" content_end → BedrockCoderMessage with partial=false
+// - SDK "agent_event" content_start (tool: attempt_completion) → BedrockCoderMessage say="completion_result"
+// - SDK "agent_event" content_end (tool: attempt_completion) → BedrockCoderMessage say="completion_result" (final)
+// - SDK "agent_event" done → BedrockCoderMessage ask="completion_result" (always; must be last message)
+// - SDK "agent_event" error → BedrockCoderMessage say="error"
+// - SDK "agent_event" usage → BedrockCoderMessage say="api_req_started" with BedrockCoderApiReqInfo JSON
 // - SDK "ended" event → finalizes the session
 
-import type { CoreSessionEvent } from "@cline/core"
-import type { Message as SdkMessage } from "@cline/llms"
-import { type AgentEvent, formatDisplayUserInput } from "@cline/shared"
+import type { CoreSessionEvent } from "@bedrock-coder/core"
+import type { Message as SdkMessage } from "@bedrock-coder/llms"
+import { type AgentEvent, formatDisplayUserInput } from "@bedrock-coder/shared"
 import { COMMAND_OUTPUT_STRING } from "@shared/combineCommandSequences"
 import type {
-	ClineApiReqInfo,
-	ClineAskUseMcpServer,
-	ClineAskUseSubagents,
-	ClineCompactionInfo,
-	ClineMessage,
-	ClineSay,
-	ClineSaySubagentStatus,
-	ClineSayTool,
-	ClineSubagentUsageInfo,
+	BedrockCoderApiReqInfo,
+	BedrockCoderAskUseMcpServer,
+	BedrockCoderAskUseSubagents,
+	BedrockCoderCompactionInfo,
+	BedrockCoderMessage,
+	BedrockCoderSay,
+	BedrockCoderSaySubagentStatus,
+	BedrockCoderSayTool,
+	BedrockCoderSubagentUsageInfo,
 	SubagentStatusItem,
 } from "@shared/ExtensionMessage"
 import { Logger } from "@shared/services/Logger"
 import { MessageIdMinter } from "./message-id-minter"
+import { compactToolResultPreview } from "./sdk-tool-result-store"
 import { isDeniedToolApprovalMistake, isKnownToolApprovalDenial } from "./tool-approval-denial"
 
 // ---------------------------------------------------------------------------
@@ -50,12 +51,12 @@ import { isDeniedToolApprovalMistake, isKnownToolApprovalDenial } from "./tool-a
 // ---------------------------------------------------------------------------
 
 /**
- * Result of translating a single SDK event into ClineMessages.
+ * Result of translating a single SDK event into BedrockCoderMessages.
  * May produce zero or more messages.
  */
 export interface TranslationResult {
 	/** Messages produced by this event */
-	messages: ClineMessage[]
+	messages: BedrockCoderMessage[]
 	/** Whether the session has ended */
 	sessionEnded: boolean
 	/** Whether the agent turn is complete */
@@ -71,6 +72,13 @@ export interface TranslationResult {
 		cacheWrites?: number
 		cacheReads?: number
 		totalCost?: number
+	}
+	/** Full tool output captured once by the extension host and replaced in chat with a reference. */
+	toolResult?: {
+		toolCallId?: string
+		toolName: string
+		content: string
+		isError: boolean
 	}
 }
 
@@ -89,7 +97,7 @@ function normalizeUsageEvent(usageEvent: {
 	const cacheWrites = usageEvent.cacheWriteTokens ?? 0
 
 	// SDK provider usage reports inputTokens as the full request size, with
-	// cache reads/writes included. Classic Cline/webview metrics expect
+	// cache reads/writes included. Classic BedrockCoder/webview metrics expect
 	// tokensIn, cacheReads, and cacheWrites to be disjoint buckets.
 	const uncachedInputTokens = Math.max(0, inputTokens - cacheReads - cacheWrites)
 
@@ -141,16 +149,8 @@ export class MessageTranslatorState {
 	 */
 	private readonly minter: MessageIdMinter
 
-	constructor(
-		minter: MessageIdMinter = new MessageIdMinter(),
-		private readonly getActiveProviderId?: () => string | undefined,
-	) {
+	constructor(minter: MessageIdMinter = new MessageIdMinter()) {
 		this.minter = minter
-	}
-
-	/** Provider backing the active turn, if the host can supply it. */
-	activeProviderId(): string | undefined {
-		return this.getActiveProviderId?.()
 	}
 
 	/** The shared minter, exposed so coordinators and history rendering mint from the same source. */
@@ -227,7 +227,7 @@ export class MessageTranslatorState {
 		this.streamingToolInput = input
 	}
 
-	/** Remember the approval prompt row for a tool call after the user approves it. */
+	/** Record the approval prompt row for a tool call after the user approves it. */
 	recordApprovedToolMessageTs(toolCallId: string, messageTs: number): void {
 		this.approvedToolMessageTsByCallId.set(toolCallId, messageTs)
 	}
@@ -383,8 +383,8 @@ export class MessageTranslatorState {
 		return this.spawnAgentStatusTs
 	}
 
-	/** Build a ClineSaySubagentStatus from the current entries */
-	buildSubagentStatus(overallStatus: ClineSaySubagentStatus["status"]): ClineSaySubagentStatus {
+	/** Build a BedrockCoderSaySubagentStatus from the current entries */
+	buildSubagentStatus(overallStatus: BedrockCoderSaySubagentStatus["status"]): BedrockCoderSaySubagentStatus {
 		const items = this.getSpawnAgentItems()
 		const completed = items.filter((e) => e.status === "completed" || e.status === "failed").length
 		const successes = items.filter((e) => e.status === "completed").length
@@ -441,15 +441,15 @@ export class MessageTranslatorState {
 }
 
 // ---------------------------------------------------------------------------
-// SDK tool name → classic ClineSayTool mapping
+// SDK tool name → classic BedrockCoderSayTool mapping
 // ---------------------------------------------------------------------------
 
 /**
- * Map an SDK tool name and its input to a ClineSayTool object that the
+ * Map an SDK tool name and its input to a BedrockCoderSayTool object that the
  * webview's ChatRow.tsx can render.
  *
- * The webview does `JSON.parse(message.text) as ClineSayTool` when
- * `say === "tool"`, so the text MUST be valid ClineSayTool JSON.
+ * The webview does `JSON.parse(message.text) as BedrockCoderSayTool` when
+ * `say === "tool"`, so the text MUST be valid BedrockCoderSayTool JSON.
  *
  * SDK tool names → classic tool names:
  *   read_files/read_file               → readFile
@@ -465,9 +465,9 @@ export class MessageTranslatorState {
  *   web_search                         → webSearch
  *   skills/use_skill                   → useSkill
  *   ask_question/ask_followup_question → (not a visual tool — handled by askQuestion executor in SdkController)
- *   MCP tools (serverName__toolName)   → (handled before reaching sdkToolToClineSayTool — emitted as say="use_mcp_server")
+ *   MCP tools (serverName__toolName)   → (handled before reaching sdkToolToBedrockCoderSayTool — emitted as say="use_mcp_server")
  */
-function sdkToolToClineSayTool(toolName: string, input?: unknown): ClineSayTool {
+function sdkToolToBedrockCoderSayTool(toolName: string, input?: unknown): BedrockCoderSayTool {
 	// Parse input if it's a string (some SDK tools pass stringified JSON)
 	const parsedInput = parseToolInput(input)
 
@@ -641,7 +641,7 @@ function sdkToolToClineSayTool(toolName: string, input?: unknown): ClineSayTool 
 				getStringField(parsedInput, "command") ??
 				""
 			return {
-				tool: toolName as ClineSayTool["tool"],
+				tool: toolName as BedrockCoderSayTool["tool"],
 				path: filePath,
 			}
 		}
@@ -726,11 +726,11 @@ function extractFileReads(input: Record<string, unknown> | undefined): FileReadR
 }
 
 /**
- * Map a read request's line range onto ClineSayTool fields. An omitted start_line with an
+ * Map a read request's line range onto BedrockCoderSayTool fields. An omitted start_line with an
  * explicit end_line means the read began at line 1; an omitted end_line stays undefined
  * (open-ended read — the UI renders it as "start+").
  */
-function readLineRangeFields(read: FileReadRequest | undefined): Pick<ClineSayTool, "readLineStart" | "readLineEnd"> {
+function readLineRangeFields(read: FileReadRequest | undefined): Pick<BedrockCoderSayTool, "readLineStart" | "readLineEnd"> {
 	if (!read || (read.startLine == null && read.endLine == null)) {
 		return {}
 	}
@@ -847,13 +847,13 @@ function parseMcpToolName(toolName: string): { serverName: string; toolName: str
 }
 
 /**
- * Build a ClineAskUseMcpServer JSON payload for MCP tool calls.
+ * Build a BedrockCoderAskUseMcpServer JSON payload for MCP tool calls.
  * This is what the webview's ChatRow expects when rendering MCP tool calls
  * (message.ask === "use_mcp_server" or message.say === "use_mcp_server").
  */
 function buildMcpToolPayload(mcpInfo: { serverName: string; toolName: string }, input?: unknown): string {
 	const parsedInput = parseToolInput(input)
-	// Format arguments as a JSON string (matching classic ClineAskUseMcpServer.arguments)
+	// Format arguments as a JSON string (matching classic BedrockCoderAskUseMcpServer.arguments)
 	let argumentsStr: string | undefined
 	if (parsedInput && Object.keys(parsedInput).length > 0) {
 		argumentsStr = JSON.stringify(parsedInput, null, 2)
@@ -866,7 +866,7 @@ function buildMcpToolPayload(mcpInfo: { serverName: string; toolName: string }, 
 		serverName: mcpInfo.serverName,
 		toolName: mcpInfo.toolName,
 		arguments: argumentsStr,
-	} satisfies ClineAskUseMcpServer)
+	} satisfies BedrockCoderAskUseMcpServer)
 }
 
 function extractCommandText(input: unknown): string {
@@ -888,12 +888,12 @@ function extractCommandText(input: unknown): string {
 }
 
 /**
- * Build the Cline approval ask message for an SDK tool approval request.
+ * Build the BedrockCoder approval ask message for an SDK tool approval request.
  * Keeps approval prompts aligned with the SDK event translator so the webview
  * can render specialized rows (MCP, commands, subagents) instead of a generic
  * tool approval with missing context.
  */
-export function buildToolApprovalAskMessage(toolName: string, input: unknown, ts: number): ClineMessage {
+export function buildToolApprovalAskMessage(toolName: string, input: unknown, ts: number): BedrockCoderMessage {
 	const mcpInfo = parseMcpToolName(toolName)
 	if (mcpInfo) {
 		return {
@@ -924,7 +924,7 @@ export function buildToolApprovalAskMessage(toolName: string, input: unknown, ts
 			ask: "use_subagents",
 			text: JSON.stringify({
 				prompts: [taskPrompt],
-			} satisfies ClineAskUseSubagents),
+			} satisfies BedrockCoderAskUseSubagents),
 			partial: false,
 		}
 	}
@@ -933,7 +933,7 @@ export function buildToolApprovalAskMessage(toolName: string, input: unknown, ts
 		ts,
 		type: "ask",
 		ask: "tool",
-		text: JSON.stringify(sdkToolToClineSayTool(toolName, input)),
+		text: JSON.stringify(sdkToolToBedrockCoderSayTool(toolName, input)),
 		partial: false,
 	}
 }
@@ -943,7 +943,7 @@ export function buildToolApprovalAskMessage(toolName: string, input: unknown, ts
 // ---------------------------------------------------------------------------
 
 /**
- * Translate an SDK AgentEvent into ClineMessage(s).
+ * Translate an SDK AgentEvent into BedrockCoderMessage(s).
  */
 /**
  * Extract a compaction divider payload from a status notice's metadata.
@@ -951,7 +951,9 @@ export function buildToolApprovalAskMessage(toolName: string, input: unknown, ts
  * (apps/cli/src/tui/utils/compaction-status.ts). Returns undefined for
  * non-compaction status notices.
  */
-export function parseCompactionNoticeMetadata(metadata: Record<string, unknown> | undefined): ClineCompactionInfo | undefined {
+export function parseCompactionNoticeMetadata(
+	metadata: Record<string, unknown> | undefined,
+): BedrockCoderCompactionInfo | undefined {
 	if (!metadata || (metadata.phase !== "started" && metadata.phase !== "completed" && metadata.phase !== "skipped")) {
 		return undefined
 	}
@@ -991,7 +993,7 @@ function asFiniteNumber(value: unknown): number | undefined {
 const INTERNAL_STATUS_NOTICES = new Set(["compaction-budget-adjusted"])
 
 /** Build the say:"compaction" divider message for a compaction status payload. */
-export function buildCompactionMessage(info: ClineCompactionInfo, ts: number): ClineMessage {
+export function buildCompactionMessage(info: BedrockCoderCompactionInfo, ts: number): BedrockCoderMessage {
 	return {
 		ts,
 		type: "say",
@@ -1012,7 +1014,7 @@ export function buildCompactionMessage(info: ClineCompactionInfo, ts: number): C
  */
 function finalizeDanglingCompaction(
 	state: MessageTranslatorState,
-	messages: ClineMessage[],
+	messages: BedrockCoderMessage[],
 	status: "cancelled" | "failed",
 ): void {
 	const ts = state.takeOpenCompactionTs()
@@ -1022,8 +1024,8 @@ function finalizeDanglingCompaction(
 	messages.push(buildCompactionMessage({ status, mode: "auto" }, ts))
 }
 
-function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): ClineMessage[] {
-	const messages: ClineMessage[] = []
+function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): BedrockCoderMessage[] {
+	const messages: BedrockCoderMessage[] = []
 
 	switch (event.type) {
 		case "content_start": {
@@ -1135,13 +1137,13 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 
 						// Emit the combined prompts list (replaces itself on each new spawn_agent)
 						const allPrompts = state.getSpawnAgentItems().map((e) => e.prompt)
-						const approvalPayload: ClineAskUseSubagents = {
+						const approvalPayload: BedrockCoderAskUseSubagents = {
 							prompts: allPrompts,
 						}
 						messages.push({
 							ts: state.getSpawnAgentPromptsTs(),
 							type: "say",
-							say: "use_subagents" as ClineSay,
+							say: "use_subagents" as BedrockCoderSay,
 							text: JSON.stringify(approvalPayload),
 							partial: true,
 						})
@@ -1153,22 +1155,22 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 
 					// MCP tools use serverName__toolName naming convention.
 					// The webview renders MCP tool calls via say/ask="use_mcp_server"
-					// with ClineAskUseMcpServer JSON, not generic say="tool".
+					// with BedrockCoderAskUseMcpServer JSON, not generic say="tool".
 					const mcpInfo = parseMcpToolName(toolName)
 					if (mcpInfo) {
 						const mcpPayload = buildMcpToolPayload(mcpInfo, input)
 						messages.push({
 							ts: state.getStreamingToolTs(),
 							type: "say",
-							say: "use_mcp_server" as ClineSay,
+							say: "use_mcp_server" as BedrockCoderSay,
 							text: mcpPayload,
 							partial: true,
 						})
 						break
 					}
 
-					// All other tools → say="tool" with ClineSayTool JSON
-					const sayTool = sdkToolToClineSayTool(toolName, input)
+					// All other tools → say="tool" with BedrockCoderSayTool JSON
+					const sayTool = sdkToolToBedrockCoderSayTool(toolName, input)
 					messages.push({
 						ts: state.getStreamingToolTs(),
 						type: "say",
@@ -1186,7 +1188,7 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 			// spawn_agent progress updates → emit say:"subagent" with live stats.
 			// The SDK's spawn_agent tool may emit content_update events with
 			// sub-agent progress (iterations, tool calls, usage). We translate
-			// these into the ClineSaySubagentStatus format for the rich UI.
+			// these into the BedrockCoderSaySubagentStatus format for the rich UI.
 			const updateToolName = event.toolName ?? state.getStreamingToolName()
 			if (updateToolName === "spawn_agent" && state.hasSpawnAgents()) {
 				const callId = event.toolCallId ?? ""
@@ -1211,7 +1213,7 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 				messages.push({
 					ts: state.getSpawnAgentStatusTs(),
 					type: "say",
-					say: "subagent" as ClineSay,
+					say: "subagent" as BedrockCoderSay,
 					text: JSON.stringify(status),
 					partial: true,
 				})
@@ -1294,7 +1296,7 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 						const items = state.getSpawnAgentItems()
 						const allDone = items.every((e) => e.status === "completed" || e.status === "failed")
 						const hasFailed = items.some((e) => e.status === "failed")
-						const overallStatus: ClineSaySubagentStatus["status"] = allDone
+						const overallStatus: BedrockCoderSaySubagentStatus["status"] = allDone
 							? hasFailed
 								? "failed"
 								: "completed"
@@ -1304,14 +1306,14 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 						messages.push({
 							ts: state.getSpawnAgentStatusTs(),
 							type: "say",
-							say: "subagent" as ClineSay,
+							say: "subagent" as BedrockCoderSay,
 							text: JSON.stringify(status),
 							partial: !allDone,
 						})
 
 						// When all done, emit subagent_usage for cost accounting
 						if (allDone) {
-							const usagePayload: ClineSubagentUsageInfo = {
+							const usagePayload: BedrockCoderSubagentUsageInfo = {
 								source: "subagents",
 								tokensIn: items.reduce((acc, e) => acc + (e.inputTokens || 0), 0),
 								tokensOut: items.reduce((acc, e) => acc + (e.outputTokens || 0), 0),
@@ -1322,7 +1324,7 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 							messages.push({
 								ts: state.nextTs(),
 								type: "say",
-								say: "subagent_usage" as ClineSay,
+								say: "subagent_usage" as BedrockCoderSay,
 								text: JSON.stringify(usagePayload),
 								partial: false,
 							})
@@ -1364,7 +1366,9 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 					if (toolName === "run_commands" || toolName === "execute_command") {
 						const storedInput = state.getStreamingToolInput()
 						const commandText = extractCommandText(storedInput)
-						const outputStr = event.error ? `Error: ${event.error}` : extractToolOutputText(event.output)
+						const outputStr = compactToolResultPreview(
+							event.error ? `Error: ${event.error}` : extractToolOutputText(event.output),
+						)
 						const ts = state.clearStreamingTool()
 						messages.push({
 							ts,
@@ -1394,22 +1398,12 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 						messages.push({
 							ts: mcpTs,
 							type: "say",
-							say: "use_mcp_server" as ClineSay,
+							say: "use_mcp_server" as BedrockCoderSay,
 							text: mcpPayload,
 							partial: false,
 						})
 
 						// Emit the MCP server response with the tool output
-						const mcpOutputStr = event.error ? `Error: ${event.error}` : extractToolOutputText(event.output)
-						if (mcpOutputStr) {
-							messages.push({
-								ts: state.nextTs(),
-								type: "say",
-								say: "mcp_server_response" as ClineSay,
-								text: mcpOutputStr,
-								partial: false,
-							})
-						}
 						break
 					}
 
@@ -1435,7 +1429,7 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 										tool: "readFile",
 										path: fileRead.path,
 										...readLineRangeFields(fileRead),
-									} satisfies ClineSayTool),
+									} satisfies BedrockCoderSayTool),
 									partial: false,
 								})
 							})
@@ -1443,7 +1437,7 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 						}
 					}
 
-					const sayTool = sdkToolToClineSayTool(toolName, storedInput)
+					const sayTool = sdkToolToBedrockCoderSayTool(toolName, storedInput)
 					// If there's an error, include it in the tool message
 					if (event.error) {
 						messages.push({
@@ -1488,7 +1482,7 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 				say: "api_req_started",
 				text: JSON.stringify({
 					request: undefined, // Will be filled in by usage event
-				} satisfies ClineApiReqInfo),
+				} satisfies BedrockCoderApiReqInfo),
 				partial: false,
 			})
 			break
@@ -1534,10 +1528,10 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 
 		case "usage": {
 			// Usage events carry token counts. The webview reads them from an
-			// api_req_started message's ClineApiReqInfo, so emit a follow-up
+			// api_req_started message's BedrockCoderApiReqInfo, so emit a follow-up
 			// api_req_started update carrying the usage data for cost display.
 			const usageEvent = normalizeUsageEvent(event)
-			const apiReqInfo: ClineApiReqInfo = {
+			const apiReqInfo: BedrockCoderApiReqInfo = {
 				tokensIn: usageEvent.tokensIn,
 				tokensOut: usageEvent.tokensOut,
 				cacheWrites: usageEvent.cacheWrites,
@@ -1572,16 +1566,9 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 			}
 
 			// Serialize the error message for the webview's ErrorRow to parse.
-			// The webview uses ClineError.parse() on the `api_req_failed` text to
-			// detect special error types (insufficient credits, spend limit, auth,
-			// quota exceeded) and render appropriate UI (e.g. "Add Credits" button).
-			//
-			// The error object from the SDK is a standard JS Error. Its `message`
-			// may contain JSON from the API (e.g. Cline provider's 402 response with
-			// `code: "insufficient_credits"`). We try to reshape it into the
-			// ClineError-serialized format the webview expects so that ErrorRow
-			// can render the correct UI (Buy Credits button, etc.).
-			const errorPayload = reshapeErrorForWebview(event.error, state.activeProviderId())
+			// Preserve structured Bedrock details such as AWS request IDs for the
+			// local error row and diagnostic output.
+			const errorPayload = reshapeErrorForWebview(event.error)
 
 			// Emit an api_req_started with streamingFailedMessage so the
 			// RequestStartRow renders the error via ErrorRow. This replaces
@@ -1592,13 +1579,12 @@ function translateAgentEvent(event: AgentEvent, state: MessageTranslatorState): 
 				say: "api_req_started",
 				text: JSON.stringify({
 					streamingFailedMessage: errorPayload,
-				} satisfies ClineApiReqInfo),
+				} satisfies BedrockCoderApiReqInfo),
 				partial: false,
 			})
 
 			// Emit ask:"api_req_failed" as the LAST message so the webview
-			// shows error recovery UI (Retry button, Add Credits button,
-			// Sign In button, etc.) instead of a stuck "Thinking..." spinner.
+			// shows error recovery UI instead of a stuck "Thinking..." spinner.
 			messages.push({
 				ts: state.nextTs(),
 				type: "ask",
@@ -1653,7 +1639,7 @@ export function translateSessionEvent(event: CoreSessionEvent, state: MessageTra
 		}
 
 		case "agent_event": {
-			// Sub-agent events should NOT produce ClineMessages in the main chat.
+			// Sub-agent events should NOT produce BedrockCoderMessages in the main chat.
 			// The sub-agent's work is represented by the parent's spawn_agent tool
 			// events (content_start/update/end), which we translate into the rich
 			// SubagentStatusRow UI. Without this filter, every sub-agent tool call,
@@ -1688,6 +1674,15 @@ export function translateSessionEvent(event: CoreSessionEvent, state: MessageTra
 			// A content_end event with contentType "tool" signals a completed
 			// tool call — if event.error is set, the tool failed.
 			if (agentEvent.type === "content_end" && agentEvent.contentType === "tool") {
+				const toolOutput = agentEvent.error ? `Error: ${agentEvent.error}` : extractToolOutputText(agentEvent.output)
+				if (toolOutput) {
+					result.toolResult = {
+						toolCallId: agentEvent.toolCallId,
+						toolName: agentEvent.toolName ?? state.getStreamingToolName() ?? "unknown",
+						content: toolOutput,
+						isError: Boolean(agentEvent.error),
+					}
+				}
 				if (
 					agentEvent.error &&
 					!isKnownToolApprovalDenial(agentEvent.error) &&
@@ -1729,7 +1724,7 @@ export function translateSessionEvent(event: CoreSessionEvent, state: MessageTra
 				result.messages.push({
 					ts: state.nextTs(),
 					type: "say",
-					say: "hook_status" as ClineSay,
+					say: "hook_status" as BedrockCoderSay,
 					text: toolName ? `Running ${toolName}...` : "Running tool...",
 					partial: false,
 				})
@@ -1737,7 +1732,7 @@ export function translateSessionEvent(event: CoreSessionEvent, state: MessageTra
 				result.messages.push({
 					ts: state.nextTs(),
 					type: "say",
-					say: "hook_status" as ClineSay,
+					say: "hook_status" as BedrockCoderSay,
 					text: toolName ? `${toolName} completed` : "Tool completed",
 					partial: false,
 				})
@@ -1777,7 +1772,7 @@ export function translateSessionEvent(event: CoreSessionEvent, state: MessageTra
 		case "team_progress":
 		case "pending_prompts": {
 			// These are handled by the team/subagent system, not translated
-			// to ClineMessages at this layer
+			// to BedrockCoderMessages at this layer
 			break
 		}
 
@@ -1822,7 +1817,7 @@ function textContentBlocksToText(content: SdkMessage["content"]): string {
 	return text.join("\n").trim()
 }
 
-function agentEventToMessages(event: AgentEvent, state: MessageTranslatorState): ClineMessage[] {
+function agentEventToMessages(event: AgentEvent, state: MessageTranslatorState): BedrockCoderMessage[] {
 	return translateSessionEvent(
 		{
 			type: "agent_event",
@@ -1836,7 +1831,7 @@ function agentEventToMessages(event: AgentEvent, state: MessageTranslatorState):
 }
 
 function appendPersistedMetricsMessage(
-	clineMessages: ClineMessage[],
+	bedrockCoderMessages: BedrockCoderMessage[],
 	message: SdkMessageWithMetrics,
 	state: MessageTranslatorState,
 ): void {
@@ -1862,7 +1857,7 @@ function appendPersistedMetricsMessage(
 		return
 	}
 
-	clineMessages.push({
+	bedrockCoderMessages.push({
 		ts: state.nextTs(),
 		type: "say",
 		say: "api_req_started",
@@ -1872,7 +1867,7 @@ function appendPersistedMetricsMessage(
 			cacheWrites: usage.cacheWrites,
 			cacheReads: usage.cacheReads,
 			cost: usage.totalCost,
-		} satisfies ClineApiReqInfo),
+		} satisfies BedrockCoderApiReqInfo),
 		partial: false,
 	})
 }
@@ -1882,10 +1877,10 @@ function finalizePersistedToolUse(
 	state: MessageTranslatorState,
 	output?: unknown,
 	isError?: boolean,
-): ClineMessage[] {
+): BedrockCoderMessage[] {
 	// Reuse the same content_start → content_end path as live SDK events. The
 	// start event seeds MessageTranslatorState with the tool input; the end event
-	// produces the final non-partial ClineMessage shape the webview expects.
+	// produces the final non-partial BedrockCoderMessage shape the webview expects.
 	agentEventToMessages(
 		{
 			type: "content_start",
@@ -1911,12 +1906,15 @@ function finalizePersistedToolUse(
 }
 
 /**
- * Convert SDK-persisted LLM messages back into the ClineMessage format used by
+ * Convert SDK-persisted LLM messages back into the BedrockCoderMessage format used by
  * the webview. Keep this in the live message translator so history rendering
- * and streaming rendering share the same SDK tool → Cline UI mapping.
+ * and streaming rendering share the same SDK tool → BedrockCoder UI mapping.
  */
-export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], minter?: MessageIdMinter): ClineMessage[] {
-	const clineMessages: ClineMessage[] = []
+export function sdkMessagesToBedrockCoderMessages(
+	messages: SdkMessageWithMetrics[],
+	minter?: MessageIdMinter,
+): BedrockCoderMessage[] {
+	const bedrockCoderMessages: BedrockCoderMessage[] = []
 	// Use the process-wide minter when provided so regenerated history ids are globally unique
 	// and never overlap live-session ids. Falls back to a private minter for standalone tests.
 	const state = new MessageTranslatorState(minter)
@@ -1924,7 +1922,7 @@ export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], mi
 
 	const flushUnmatchedToolUses = () => {
 		for (const toolUse of pendingToolUses.values()) {
-			clineMessages.push(...finalizePersistedToolUse(toolUse, state))
+			bedrockCoderMessages.push(...finalizePersistedToolUse(toolUse, state))
 		}
 		pendingToolUses.clear()
 	}
@@ -1936,11 +1934,11 @@ export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], mi
 			if (typeof message.content === "string") {
 				const text = message.content.trim()
 				if (text) {
-					clineMessages.push(
+					bedrockCoderMessages.push(
 						...agentEventToMessages({ type: "content_end", contentType: "text", text } as AgentEvent, state),
 					)
 				}
-				appendPersistedMetricsMessage(clineMessages, message, state)
+				appendPersistedMetricsMessage(bedrockCoderMessages, message, state)
 				continue
 			}
 
@@ -1948,7 +1946,7 @@ export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], mi
 				switch (block.type) {
 					case "text":
 						if (block.text.trim()) {
-							clineMessages.push(
+							bedrockCoderMessages.push(
 								...agentEventToMessages(
 									{
 										type: "content_end",
@@ -1962,7 +1960,7 @@ export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], mi
 						break
 					case "thinking":
 						if (block.thinking.trim()) {
-							clineMessages.push(
+							bedrockCoderMessages.push(
 								...agentEventToMessages(
 									{
 										type: "content_end",
@@ -1979,17 +1977,17 @@ export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], mi
 						break
 				}
 			}
-			appendPersistedMetricsMessage(clineMessages, message, state)
+			appendPersistedMetricsMessage(bedrockCoderMessages, message, state)
 			continue
 		}
 
 		if (typeof message.content === "string") {
 			const text = message.content.trim()
 			if (text) {
-				clineMessages.push({
+				bedrockCoderMessages.push({
 					ts: state.nextTs(),
 					type: "say",
-					say: clineMessages.length === 0 ? "task" : "user_feedback",
+					say: bedrockCoderMessages.length === 0 ? "task" : "user_feedback",
 					text,
 					partial: false,
 				})
@@ -1999,10 +1997,10 @@ export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], mi
 
 		const userText = textContentBlocksToText(message.content)
 		if (userText) {
-			clineMessages.push({
+			bedrockCoderMessages.push({
 				ts: state.nextTs(),
 				type: "say",
-				say: clineMessages.length === 0 ? "task" : "user_feedback",
+				say: bedrockCoderMessages.length === 0 ? "task" : "user_feedback",
 				text: userText,
 				partial: false,
 			})
@@ -2019,7 +2017,7 @@ export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], mi
 			}
 
 			pendingToolUses.delete(block.tool_use_id)
-			clineMessages.push(...finalizePersistedToolUse(toolUse, state, block.content, block.is_error))
+			bedrockCoderMessages.push(...finalizePersistedToolUse(toolUse, state, block.content, block.is_error))
 		}
 	}
 
@@ -2029,7 +2027,7 @@ export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], mi
 	// the last raw message to determine UI state. If the usage
 	// event is last, the webview shows "Thinking..." instead of
 	// the completion UI
-	clineMessages.push({
+	bedrockCoderMessages.push({
 		ts: state.nextTs(),
 		type: "ask",
 		ask: "completion_result",
@@ -2038,7 +2036,7 @@ export function sdkMessagesToClineMessages(messages: SdkMessageWithMetrics[], mi
 	})
 
 	flushUnmatchedToolUses()
-	return clineMessages
+	return bedrockCoderMessages
 }
 
 // ---------------------------------------------------------------------------
@@ -2086,7 +2084,7 @@ const MODEL_NOT_FOUND_GUIDANCE =
  * matches on text rather than a status code.
  */
 function describeModelNotFoundError(rawMessage: string): string | undefined {
-	// Anthropic's 404 body collapses to a bare "model: <id>" label.
+	// Some model-not-found responses collapse to a bare "model: <id>" label.
 	const bareModelLabel = rawMessage.match(/^\s*model:\s*(\S+)\s*$/i)
 	if (bareModelLabel) {
 		return `Model "${bareModelLabel[1]}" was not found. ${MODEL_NOT_FOUND_GUIDANCE}`
@@ -2094,7 +2092,9 @@ function describeModelNotFoundError(rawMessage: string): string | undefined {
 
 	// Keep the not-found signal in the same clause as "model" so errors that
 	// merely mention one (plan gating, deprecated features) are left untouched.
-	const modelNotFound = /\bmodel\b[^.,;:]*\b(not[ _]?found|does not exist|no such model|unknown model)\b/i
+	// Bedrock model IDs commonly contain periods and a version colon, so only
+	// line breaks delimit the search rather than model-ID punctuation.
+	const modelNotFound = /\bmodel\b[^\r\n]*\b(not[ _]?found|does not exist|no such model|unknown model)\b/i
 	if (modelNotFound.test(rawMessage)) {
 		return `${rawMessage} ${MODEL_NOT_FOUND_GUIDANCE}`
 	}
@@ -2103,13 +2103,13 @@ function describeModelNotFoundError(rawMessage: string): string | undefined {
 }
 
 /**
- * Reshape an SDK error into the serialized ClineError JSON the webview's
+ * Reshape an SDK error into the serialized BedrockCoderError JSON the webview's
  * ErrorRow expects (`code`, `providerId`, `details`), extracting structured
  * info from the error message when present and falling back to raw text.
  */
 export function reshapeErrorForWebview(
 	error: { message?: string; status?: number; code?: string },
-	providerId = "cline",
+	providerId = "bedrock",
 ): string {
 	const rawMessage = error.message ?? "Unknown error"
 
@@ -2120,7 +2120,7 @@ export function reshapeErrorForWebview(
 		parsed = JSON.parse(rawMessage)
 	} catch {
 		// Not JSON — try to find JSON embedded in the message
-		// (e.g. "Error: {\"code\":\"insufficient_credits\",...}")
+		// (e.g. "Error: {\"code\":\"ValidationException\",...}")
 		const jsonMatch = rawMessage.match(/\{[\s\S]*"code"[\s\S]*\}/)
 		if (jsonMatch) {
 			try {
@@ -2132,44 +2132,6 @@ export function reshapeErrorForWebview(
 	}
 
 	if (!parsed) {
-		// Plain-text error — the SDK sometimes strips structured API error JSON
-		// and delivers only a human-readable string such as
-		// "Not enough credits available" or "Your daily spend limit of $20.00
-		// has been reached." Detect these by keyword and synthesize the
-		// ClineError-compatible JSON the webview expects.
-		const lower = rawMessage.toLowerCase()
-		if (
-			lower.includes("insufficient_credits") ||
-			lower.includes("insufficient credits") ||
-			lower.includes("insufficient balance") ||
-			lower.includes("not enough credits") ||
-			lower.includes("run out of credits") ||
-			lower.includes("out of credits")
-		) {
-			// Extract balance from text like "balance is $-0.14" if present
-			const balanceMatch = rawMessage.match(/\$(-?\d+(?:\.\d+)?)/)
-			const balance = balanceMatch ? Number.parseFloat(balanceMatch[1]) : 0
-			return JSON.stringify({
-				message: rawMessage,
-				code: "insufficient_credits",
-				providerId,
-				details: {
-					current_balance: balance,
-					message: rawMessage,
-				},
-			})
-		}
-		if (lower.includes("spend_limit_exceeded") || lower.includes("spend limit")) {
-			return JSON.stringify({
-				message: rawMessage,
-				code: "SPEND_LIMIT_EXCEEDED",
-				providerId,
-				details: {
-					code: "SPEND_LIMIT_EXCEEDED",
-					message: rawMessage,
-				},
-			})
-		}
 		const notFoundMessage = describeModelNotFoundError(rawMessage)
 		if (notFoundMessage) {
 			return notFoundMessage
@@ -2177,43 +2139,5 @@ export function reshapeErrorForWebview(
 		return rawMessage
 	}
 
-	// Detect insufficient credits (402) — needs code + current_balance for
-	// ClineError.getErrorType() to return ClineErrorType.Balance
-	const code = (parsed.code as string) ?? error.code
-	if (code === "insufficient_credits" && typeof parsed.current_balance === "number") {
-		return JSON.stringify({
-			message: (parsed.message as string) ?? rawMessage,
-			code: "insufficient_credits",
-			providerId,
-			details: {
-				current_balance: parsed.current_balance,
-				total_spent: parsed.total_spent,
-				total_promotions: parsed.total_promotions,
-				message: (parsed.message as string) ?? "You have run out of credits.",
-				buy_credits_url: parsed.buy_credits_url,
-			},
-		})
-	}
-
-	// Detect spend limit exceeded (429)
-	if (code === "SPEND_LIMIT_EXCEEDED") {
-		return JSON.stringify({
-			message: (parsed.message as string) ?? rawMessage,
-			code: "SPEND_LIMIT_EXCEEDED",
-			providerId,
-			details: {
-				code: "SPEND_LIMIT_EXCEEDED",
-				limit_scope: parsed.limit_scope,
-				budget_period: parsed.budget_period,
-				limit_usd: parsed.limit_usd,
-				spent_usd: parsed.spent_usd,
-				resets_at: parsed.resets_at,
-				message: parsed.message,
-			},
-		})
-	}
-
-	// For other structured errors, pass through the parsed JSON so
-	// ClineError.parse() can still extract what it can.
-	return JSON.stringify(parsed)
+	return JSON.stringify({ ...parsed, providerId: parsed.providerId ?? providerId })
 }

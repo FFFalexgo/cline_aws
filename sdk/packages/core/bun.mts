@@ -17,9 +17,9 @@ const external = Object.keys({
 	...(packageJson.peerDependencies ?? {}),
 });
 
-const sourcemap = Bun.env.CLINE_SOURCEMAPS === "1" ? "linked" : "none";
+const sourcemap = Bun.env.BEDROCK_CODER_SOURCEMAPS === "1" ? "linked" : "none";
 // minify: true keeps identifier mangling active even when sourcemaps are enabled.
-const minify = Bun.env.CLINE_SOURCEMAPS !== "1";
+const minify = Bun.env.BEDROCK_CODER_SOURCEMAPS !== "1";
 
 const buildConfig = {
 	target: "node",
@@ -45,16 +45,6 @@ const builds: Parameters<typeof Bun.build>[0][] = [
 	{
 		entrypoints: ["./src/hub/daemon/entry.ts"],
 		outdir: "./dist/hub/daemon",
-		...buildConfig,
-	},
-	{
-		entrypoints: ["./src/services/telemetry/index.ts"],
-		outdir: "./dist/services/telemetry",
-		...buildConfig,
-	},
-	{
-		entrypoints: ["./src/services/feature-flags/posthog.ts"],
-		outdir: "./dist/services/feature-flags",
 		...buildConfig,
 	},
 	// The plugin sandbox bootstrap runs in an isolated child process via

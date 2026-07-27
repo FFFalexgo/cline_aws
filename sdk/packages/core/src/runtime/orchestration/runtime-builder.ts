@@ -1,10 +1,20 @@
 import type {
 	AgentTool,
 	BasicLogger,
+	CreateTeamTaskInput,
 	RuntimeConfigExtensionKind,
+	TeamBoardSnapshot,
+	TeamRunRecord,
+	TeamTask,
 	TeamTeammateSpec,
-} from "@cline/shared";
-import { hasRuntimeConfigExtension } from "@cline/shared";
+	UpdateTeamTaskInput,
+} from "@bedrock-coder/shared";
+import { createHash } from "node:crypto";
+import path from "node:path";
+import {
+	getToolApprovalDecision,
+	hasRuntimeConfigExtension,
+} from "@bedrock-coder/shared";
 import { nanoid } from "nanoid";
 import { createUserInstructionConfigService } from "../../extensions/config";
 import {
@@ -53,6 +63,20 @@ function hasConfigExtension(
 	return hasRuntimeConfigExtension(extensions, kind);
 }
 
+function createWorkspaceTeamStoreKey(
+	workspaceRoot: string,
+	sessionOrTeamId: string,
+): string {
+	const resolved = path.resolve(workspaceRoot);
+	const identity =
+		process.platform === "win32" ? resolved.toLowerCase() : resolved;
+	const digest = createHash("sha256")
+		.update(identity)
+		.digest("hex")
+		.slice(0, 12);
+	return `workspace-${digest}-${sessionOrTeamId}`;
+}
+
 function isToolEnabledByPolicies(
 	toolName: string,
 	toolPolicies: CoreSessionConfig["toolPolicies"],
@@ -81,6 +105,16 @@ function filterAvailableTools(
 	toolPolicies: CoreSessionConfig["toolPolicies"],
 ): AgentTool[] {
 	return filterDisabledTools(filterToolsByPolicies(tools, toolPolicies));
+}
+
+function filterToolsForMode(
+	tools: AgentTool[],
+	mode: CoreAgentMode,
+): AgentTool[] {
+	return tools.filter(
+		(tool) =>
+			getToolApprovalDecision({ toolName: tool.name, mode }) !== "prohibited",
+	);
 }
 
 const CONFIGURED_AGENT_TOOL_NAME_ALIASES: Record<string, string> = {
@@ -291,24 +325,22 @@ function normalizeConfig(
 		| "enableSpawnAgent"
 		| "enableAgentTeams"
 		| "disableMcpSettingsTools"
-		| "yolo"
 		| "missionLogIntervalSteps"
 		| "missionLogIntervalMs"
+		| "maxConcurrentTeamRuns"
 		| "sessionId"
 	>
 > {
 	const preset = ToolPresets[resolveToolPresetName({ mode: config.mode })];
 	return {
 		sessionId: config.sessionId || "",
-		mode:
-			config.mode === "plan" ? "plan" : config.mode === "yolo" ? "yolo" : "act",
+		mode: config.mode === "plan" ? "plan" : "act",
 		enableTools: config.enableTools !== false,
 		enableSpawnAgent:
 			config.enableSpawnAgent ?? preset.enableSpawnAgent ?? true,
 		enableAgentTeams:
 			config.enableAgentTeams ?? preset.enableAgentTeams ?? true,
 		disableMcpSettingsTools: config.disableMcpSettingsTools === true,
-		yolo: config.yolo === true,
 		missionLogIntervalSteps:
 			typeof config.missionLogIntervalSteps === "number" &&
 			Number.isFinite(config.missionLogIntervalSteps)
@@ -319,6 +351,11 @@ function normalizeConfig(
 			Number.isFinite(config.missionLogIntervalMs)
 				? config.missionLogIntervalMs
 				: 120000,
+		maxConcurrentTeamRuns:
+			typeof config.maxConcurrentTeamRuns === "number" &&
+			Number.isFinite(config.maxConcurrentTeamRuns)
+				? Math.max(1, Math.floor(config.maxConcurrentTeamRuns))
+				: 2,
 	};
 }
 
@@ -333,13 +370,44 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 		}
 	>();
 
+	getTeamBoard(sessionId: string): TeamBoardSnapshot | undefined {
+		return this.teamRuntimeEntries.get(sessionId)?.runtime?.getBoardSnapshot();
+	}
+
+	createTeamTask(
+		sessionId: string,
+		input: Omit<CreateTeamTaskInput, "createdBy">,
+	): TeamTask {
+		const runtime = this.requireTeamRuntime(sessionId);
+		return runtime.createTask({ ...input, createdBy: "user" });
+	}
+
+	updateTeamTask(sessionId: string, input: UpdateTeamTaskInput): TeamTask {
+		return this.requireTeamRuntime(sessionId).updateTask(input);
+	}
+
+	cancelTeamRun(
+		sessionId: string,
+		runId: string,
+		reason?: string,
+	): TeamRunRecord {
+		return this.requireTeamRuntime(sessionId).cancelRun(runId, reason);
+	}
+
+	private requireTeamRuntime(sessionId: string): AgentTeamsRuntime {
+		const runtime = this.teamRuntimeEntries.get(sessionId)?.runtime;
+		if (!runtime) {
+			throw new Error(`Team runtime is not active for session "${sessionId}"`);
+		}
+		return runtime;
+	}
+
 	async build(input: RuntimeBuilderInput): Promise<RuntimeEnvironment> {
 		const {
 			config,
 			hooks,
 			extensions,
 			logger,
-			telemetry,
 			createSpawnTool,
 			onTeamRestored,
 			userInstructionService: sharedUserInstructionService,
@@ -353,7 +421,11 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 		const globallyDisabledToolNames = resolveDisabledToolNames();
 		const tools: AgentTool[] = [];
 		const effectiveTeamName = config.teamName?.trim() || createTeamName();
-		const teamStoreKey = config.sessionId?.trim() || effectiveTeamName;
+		const legacyTeamStoreKey = config.sessionId?.trim() || effectiveTeamName;
+		const teamStoreKey = createWorkspaceTeamStoreKey(
+			workspaceConfigRoot,
+			legacyTeamStoreKey,
+		);
 		const configuredAgents = normalized.enableSpawnAgent
 			? loadConfiguredAgentConfigs({
 					workspaceRoot: workspaceConfigRoot,
@@ -461,7 +533,12 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 		const teamStore = normalized.enableAgentTeams
 			? createLocalTeamStore()
 			: undefined;
-		const restoredTeam = teamStore?.loadRuntime(teamStoreKey);
+		const scopedRestoredTeam = teamStore?.loadRuntime(teamStoreKey);
+		const restoredTeam =
+			scopedRestoredTeam?.state !== undefined ||
+			(scopedRestoredTeam?.teammates.length ?? 0) > 0
+				? scopedRestoredTeam
+				: teamStore?.loadRuntime(legacyTeamStoreKey);
 		const restoredTeamState = restoredTeam?.state;
 		const restoredTeammateSpecs = restoredTeam?.teammates ?? [];
 		const teammateSpecs = new Map(
@@ -479,9 +556,6 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 			providerId: config.providerId,
 			modelId: config.modelId,
 			cwd: config.cwd,
-			apiKey: config.apiKey ?? "",
-			baseUrl: config.baseUrl,
-			headers: config.headers,
 			providerConfig: config.providerConfig,
 			knownModels: config.knownModels,
 			thinking: config.thinking,
@@ -493,7 +567,6 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 			hooks,
 			extensions: runtimeExtensions,
 			logger: logger ?? config.logger,
-			telemetry: input.telemetry ?? config.telemetry,
 			workspaceMetadata: config.workspaceMetadata,
 		});
 		if (normalized.enableSpawnAgent) {
@@ -559,6 +632,7 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 					leadAgentId: config.sessionId || "lead",
 					missionLogIntervalSteps: normalized.missionLogIntervalSteps,
 					missionLogIntervalMs: normalized.missionLogIntervalMs,
+					maxConcurrentRuns: normalized.maxConcurrentTeamRuns,
 					onTeamEvent: (event: TeamEvent) => {
 						onTeamEvent(event);
 						if (teamRuntime && teamStore) {
@@ -614,9 +688,9 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 						leadAgentInstance?.addTools(teamTools);
 					},
 					createBaseTools: normalized.enableTools
-						? () =>
+						? (cwd) =>
 								createBuiltinToolsList(
-									config.cwd,
+									cwd ?? config.cwd,
 									config.providerId,
 									normalized.mode,
 									config.modelId,
@@ -627,10 +701,14 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 								)
 						: undefined,
 					teammateConfigProvider: delegatedAgentConfigProvider,
+					toolPolicies: effectiveToolPolicies,
+					requestToolApproval: input.requestToolApproval,
 				});
 
 				if (restoredStateHydratedIntoRuntime) {
-					teamRuntime.recoverActiveRuns("runtime_recovered");
+					teamRuntime.markStaleRunsInterrupted(
+						"Extension restarted; resume this run explicitly after inspecting its worktree",
+					);
 				}
 
 				if (teamBootstrap.restoredFromPersistence) {
@@ -657,7 +735,10 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 			ensureTeamRuntime();
 		}
 
-		const finalTools = filterAvailableTools(tools, effectiveToolPolicies);
+		const finalTools = filterToolsForMode(
+			filterAvailableTools(tools, effectiveToolPolicies),
+			normalized.mode,
+		);
 		const requiresCompletionTool = finalTools.some(
 			(tool) =>
 				tool.name === "submit_and_exit" &&
@@ -669,7 +750,11 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 					if (!rt) return undefined;
 					const tasks = rt.listTasks();
 					const hasInProgress = tasks.some(
-						(t) => t.status === "in_progress" || t.status === "pending",
+						(t) =>
+							t.status === "backlog" ||
+							t.status === "ready" ||
+							t.status === "in-progress" ||
+							t.status === "blocked",
 					);
 					const runs = rt.listRuns({});
 					const hasActiveRuns = runs.some(
@@ -678,7 +763,11 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 					if (hasInProgress || hasActiveRuns) {
 						const pending = tasks
 							.filter(
-								(t) => t.status === "in_progress" || t.status === "pending",
+								(t) =>
+									t.status === "backlog" ||
+									t.status === "ready" ||
+									t.status === "in-progress" ||
+									t.status === "blocked",
 							)
 							.map((t) => `${t.id} (${t.status}): ${t.title}`)
 							.join(", ");
@@ -709,7 +798,6 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 		return {
 			tools: finalTools,
 			logger: logger ?? config.logger,
-			telemetry: telemetry ?? config.telemetry,
 			teamRuntime,
 			teamRestoredFromPersistence: Boolean(restoredTeamState),
 			delegatedAgentConfigProvider:
@@ -721,13 +809,19 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 				leadAgentInstance = agent;
 				if (pendingLeadTeamTools.length > 0) {
 					agent.addTools(
-						filterDisabledTools(pendingLeadTeamTools, [
-							...globallyDisabledToolNames,
-						]),
+						filterToolsForMode(
+							filterDisabledTools(pendingLeadTeamTools, [
+								...globallyDisabledToolNames,
+							]),
+							normalized.mode,
+						),
 					);
 				}
 			},
 			shutdown: async (reason: string) => {
+				if (teamRuntime && isRuntimeLifecycleShutdownReason(reason)) {
+					teamRuntime.markStaleRunsInterrupted(reason);
+				}
 				shutdownTeamRuntime(teamRuntime, reason);
 				this.teamRuntimeEntries.delete(registryKey);
 				await mcpShutdown?.();

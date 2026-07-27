@@ -1,4 +1,3 @@
-import { resolveProviderRequestHeaders } from "@cline/llms";
 import type {
 	AgentEvent,
 	AgentFinishReason,
@@ -8,12 +7,10 @@ import type {
 	HubClientContribution,
 	HubEventEnvelope,
 	SessionRecord as HubSessionRecord,
-	ITelemetryService,
 	JsonValue,
 	ToolApprovalRequest,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import {
-	captureSdkError,
 	createSessionId,
 	HUB_CHECKPOINT_CAPABILITY,
 	HUB_COMPACTION_CAPABILITY,
@@ -23,8 +20,7 @@ import {
 	HUB_TOOL_EXECUTOR_CAPABILITY_PREFIX,
 	HUB_USER_INSTRUCTIONS_SNAPSHOT_CAPABILITY,
 	isHubToolExecutorName,
-} from "@cline/shared";
-import { version as corePackageVersion } from "../../../package.json";
+} from "@bedrock-coder/shared";
 import type { HookEventPayload } from "../../hooks";
 import type { RuntimeCapabilities } from "../../runtime/capabilities";
 import { normalizeRuntimeCapabilities } from "../../runtime/capabilities";
@@ -130,34 +126,9 @@ function buildCommandSessionConfig(
 ): Record<string, unknown> {
 	const sessionConfig: Record<string, unknown> = {
 		...(input.config as Record<string, unknown>),
+		providerId: "bedrock",
 		sessionId,
 	};
-	const headers = resolveProviderRequestHeaders({
-		providerId: input.config.providerId,
-		sessionId,
-		source: input.source,
-		defaultSource: SessionSource.CORE,
-		client: {
-			name: input.localRuntime?.extensionContext?.client?.name,
-			version: input.localRuntime?.extensionContext?.client?.version,
-			versionHeaderFallback: input.config.headers?.["X-CLIENT-VERSION"],
-			platform: input.localRuntime?.extensionContext?.client?.platform,
-			platformVersion:
-				input.localRuntime?.extensionContext?.client?.platformVersion,
-			isMultiRoot: input.localRuntime?.extensionContext?.client?.isMultiRoot,
-		},
-		coreVersion: corePackageVersion,
-		openAiCodex: {
-			accessToken: input.config.apiKey,
-			userAgentVersion: process.env.npm_package_version,
-		},
-		headers: {
-			config: input.config.headers,
-		},
-	});
-	if (headers) {
-		sessionConfig.headers = headers;
-	}
 	return sessionConfig;
 }
 
@@ -552,7 +523,6 @@ export interface HubRuntimeHostOptions {
 	clientType?: string;
 	displayName?: string;
 	capabilities?: RuntimeCapabilities;
-	telemetry?: ITelemetryService;
 }
 
 function mapStatus(
@@ -744,7 +714,6 @@ export class HubRuntimeHost implements RuntimeHost {
 		AbortController
 	>();
 	private readonly defaultCapabilities: RuntimeCapabilities;
-	private readonly telemetry?: ITelemetryService;
 
 	constructor(
 		options: HubRuntimeHostOptions,
@@ -760,7 +729,6 @@ export class HubRuntimeHost implements RuntimeHost {
 		};
 		this.defaultCapabilities =
 			normalizeRuntimeCapabilities(options.capabilities) ?? {};
-		this.telemetry = options.telemetry;
 		this.runtimeAddress = options.url;
 		this.pendingPrompts = {
 			list: (input) => this.requestPendingPromptsList(input),
@@ -1079,7 +1047,7 @@ export class HubRuntimeHost implements RuntimeHost {
 			this.ensureSessionSubscription(newSessionId);
 		}
 		const messages = Array.isArray(reply.payload?.messages)
-			? (reply.payload.messages as import("@cline/llms").Message[])
+			? (reply.payload.messages as import("@bedrock-coder/llms").Message[])
 			: undefined;
 		const checkpoint = reply.payload?.checkpoint as
 			| RestoreSessionResult["checkpoint"]
@@ -1391,20 +1359,6 @@ export class HubRuntimeHost implements RuntimeHost {
 			target,
 		);
 		if (!reply.ok) {
-			captureSdkError(this.telemetry, {
-				component: "core",
-				operation: "hub.runtime_host.update_session_compaction_state",
-				error: new Error(
-					hubReplyErrorMessage(reply, "session.compaction.update"),
-				),
-				severity: "warn",
-				handled: true,
-				context: {
-					command: "session.compaction.update",
-					sessionId: target,
-					errorCode: reply.error?.code,
-				},
-			});
 		}
 		return {
 			updated: reply.ok && reply.payload?.updated === true,
@@ -1429,7 +1383,7 @@ export class HubRuntimeHost implements RuntimeHost {
 
 	async readSessionMessages(
 		sessionId: string,
-	): Promise<import("@cline/llms").Message[]> {
+	): Promise<import("@bedrock-coder/llms").Message[]> {
 		const target = sessionId.trim();
 		if (!target) {
 			return [];
@@ -1440,24 +1394,11 @@ export class HubRuntimeHost implements RuntimeHost {
 			target,
 		);
 		if (!reply.ok) {
-			captureSdkError(this.telemetry, {
-				component: "core",
-				operation: "hub.runtime_host.read_session_messages",
-				error: new Error(hubReplyErrorMessage(reply, "session.messages")),
-				severity: reply.error?.code === "session_not_found" ? "warn" : "error",
-				handled: true,
-				context: {
-					command: "session.messages",
-					sessionId: target,
-					errorCode: reply.error?.code,
-					runtimeAddress: this.runtimeAddress,
-				},
-			});
 			throw new Error(hubReplyErrorMessage(reply, "session.messages"));
 		}
 		const messages = reply.payload?.messages;
 		return Array.isArray(messages)
-			? (messages as import("@cline/llms").Message[])
+			? (messages as import("@bedrock-coder/llms").Message[])
 			: [];
 	}
 
@@ -1930,26 +1871,11 @@ export class HubRuntimeHost implements RuntimeHost {
 	}
 
 	private captureDetachedHubEventError(
-		operation: string,
-		error: unknown,
-		event: HubEventEnvelope,
+		_operation: string,
+		_error: unknown,
+		_event: HubEventEnvelope,
 	): void {
-		try {
-			captureSdkError(this.telemetry, {
-				component: "core",
-				operation,
-				error,
-				severity: "warn",
-				handled: true,
-				context: {
-					event: event.event,
-					sessionId: event.sessionId,
-					runtimeAddress: this.runtimeAddress,
-				},
-			});
-		} catch {
-			// Telemetry must not rethrow from detached hub event handlers.
-		}
+		// Detached hub event failures are already surfaced through the event reply path.
 	}
 
 	private async handleCapabilityRequest(
@@ -2105,7 +2031,7 @@ export class HubRuntimeHost implements RuntimeHost {
 			typeof event.payload.policy === "object" &&
 			!Array.isArray(event.payload.policy)
 				? (event.payload.policy as ToolApprovalRequest["policy"])
-				: { autoApprove: false };
+				: {};
 		const input = parseApprovalInput(event.payload?.inputJson);
 		this.pendingApprovalToolCallIds.add(toolCallId);
 		this.emitToolCallContentStart({

@@ -1,4 +1,4 @@
-import type * as LlmsProviders from "@cline/llms";
+import type * as LlmsProviders from "@bedrock-coder/llms";
 import type {
 	CheckpointEntry,
 	CheckpointMetadata,
@@ -166,11 +166,20 @@ export class SessionVersioningService {
 			cwd: input.cwd,
 			restoreMessages,
 		});
-		if (restoreWorkspace) {
-			await (input.applyWorkspaceCheckpoint ?? applyCheckpointToWorktree)(
-				plan.cwd,
-				plan.checkpoint,
-			);
+	if (restoreWorkspace) {
+			if (input.restore?.workspaceApproved !== true) {
+				throw new SessionVersioningError(
+					"invalid_restore",
+					"Explicit approval is required before restoring workspace files",
+				);
+			}
+			if (input.applyWorkspaceCheckpoint) {
+				await input.applyWorkspaceCheckpoint(plan.cwd, plan.checkpoint);
+			} else {
+				await applyCheckpointToWorktree(plan.cwd, plan.checkpoint, {
+					approved: true,
+				});
+			}
 		}
 
 		const sourceSnapshot = createCoreSessionSnapshot({

@@ -1,4 +1,4 @@
-import type { TeamProgressProjectionEvent } from "@cline/shared";
+import type { TeamProgressProjectionEvent } from "@bedrock-coder/shared";
 import type { SessionUsageSummary } from "../../../runtime/host/runtime-host";
 import type {
 	CoreSessionEvent,
@@ -54,6 +54,7 @@ export async function projectSessionEvent(
 				sessionId: event.payload.sessionId,
 				summary: event.payload.summary,
 				lastEvent: event.payload.lifecycle,
+				changes: event.payload.changes ?? {},
 			};
 			ctx.publish(
 				ctx.buildEvent(

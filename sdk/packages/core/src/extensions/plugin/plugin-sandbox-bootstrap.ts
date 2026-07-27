@@ -12,10 +12,9 @@
 
 import {
 	type AgentExtensionMcpServer,
-	type AutomationEventEnvelope,
 	normalizePluginManifest,
 	type PluginManifest,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import { importPluginModule } from "./plugin-module-import";
 import {
 	matchesPluginManifestTargeting,
@@ -43,7 +42,7 @@ interface PluginCommand {
 	) => Promise<PluginCommandResult> | PluginCommandResult;
 }
 
-// Keep this local mirror in sync with AgentExtensionCommandResult from @cline/shared.
+// Keep this local mirror in sync with AgentExtensionCommandResult from @bedrock-coder/shared.
 // The sandbox bootstrap runs in an isolated process and avoids host package imports.
 type PluginCommandResult =
 	| string
@@ -69,34 +68,19 @@ interface PluginProvider {
 	metadata?: Record<string, unknown>;
 }
 
-interface PluginAutomationEventType {
-	eventType: string;
-	source: string;
-	description?: string;
-	attributesSchema?: Record<string, unknown>;
-	payloadSchema?: Record<string, unknown>;
-	examples?: AutomationEventEnvelope[];
-	metadata?: Record<string, unknown>;
-}
-
 interface PluginApi {
 	registerTool(tool: PluginTool): void;
 	registerCommand(command: PluginCommand): void;
 	registerRule(rule: PluginRule): void;
 	registerMessageBuilder(builder: PluginMessageBuilder): void;
 	registerProvider(provider: PluginProvider): void;
-	registerAutomationEventType(eventType: PluginAutomationEventType): void;
 	registerMcpServer(server: AgentExtensionMcpServer): void;
 }
 
 interface PluginSetupCtx {
 	session?: unknown;
 	client?: unknown;
-	user?: unknown;
 	workspaceInfo?: unknown;
-	automation?: {
-		ingestEvent(event: AutomationEventEnvelope): void | Promise<void>;
-	};
 	logger?: {
 		debug(message: string, metadata?: Record<string, unknown>): void;
 		log(message: string, metadata?: Record<string, unknown>): void;
@@ -131,17 +115,6 @@ interface RuleContributionDescriptor {
 	hasContentHandler?: boolean;
 }
 
-interface AutomationEventTypeDescriptor {
-	id: string;
-	eventType: string;
-	source: string;
-	description?: string;
-	attributesSchema?: Record<string, unknown>;
-	payloadSchema?: Record<string, unknown>;
-	examples?: AutomationEventEnvelope[];
-	metadata?: Record<string, unknown>;
-}
-
 interface PluginDescriptor {
 	pluginId: string;
 	pluginPath: string;
@@ -154,7 +127,6 @@ interface PluginDescriptor {
 		rules: RuleContributionDescriptor[];
 		messageBuilders: ContributionDescriptor[];
 		providers: ContributionDescriptor[];
-		automationEventTypes: AutomationEventTypeDescriptor[];
 		mcpServers: AgentExtensionMcpServer[];
 		shortcuts?: ContributionDescriptor[];
 		flags?: ContributionDescriptor[];
@@ -256,22 +228,8 @@ function assertValidPluginSetupCtx(
 	if (ctx.client !== undefined && !isObject(ctx.client)) {
 		throw new Error("Plugin setup context client must be an object");
 	}
-	if (ctx.user !== undefined && !isObject(ctx.user)) {
-		throw new Error("Plugin setup context user must be an object");
-	}
 	if (ctx.workspaceInfo !== undefined && !isObject(ctx.workspaceInfo)) {
 		throw new Error("Plugin setup context workspaceInfo must be an object");
-	}
-	if (ctx.automation !== undefined && !isObject(ctx.automation)) {
-		throw new Error("Plugin setup context automation must be an object");
-	}
-	if (
-		ctx.automation !== undefined &&
-		typeof ctx.automation.ingestEvent !== "function"
-	) {
-		throw new Error(
-			"Plugin setup context automation.ingestEvent must be a function",
-		);
 	}
 	if (ctx.logger !== undefined && !isObject(ctx.logger)) {
 		throw new Error("Plugin setup context logger must be an object");
@@ -312,14 +270,14 @@ function emitEvent(name: string, payload?: unknown): void {
 }
 
 // Expose event emitter to plugins.
-(globalThis as Record<string, unknown>).__clinePluginHost = { emitEvent };
+(globalThis as Record<string, unknown>).__bedrockCoderPluginHost = { emitEvent };
 
 /**
  * Session workspace env — populated by `initialize()` and available to any
  * plugin code that executes before the setup hook, or cannot use hook context.
  * Prefer using PluginSetupCtx from the setup function when possible.
  */
-(globalThis as Record<string, unknown>).__clineSessionEnv = {
+(globalThis as Record<string, unknown>).__bedrockCoderSessionEnv = {
 	cwd: undefined as string | undefined,
 	workspaceInfo: undefined as unknown,
 };
@@ -379,30 +337,6 @@ function makeId(pluginId: string, prefix: string): string {
 	return `${pluginId}_${prefix}_${next}`;
 }
 
-function normalizeAutomationEventType(
-	eventType: PluginAutomationEventType,
-): PluginAutomationEventType {
-	const normalizedEventType =
-		typeof eventType.eventType === "string" ? eventType.eventType.trim() : "";
-	const source =
-		typeof eventType.source === "string" ? eventType.source.trim() : "";
-	if (!normalizedEventType) {
-		throw new Error("Automation event type contribution requires eventType");
-	}
-	if (!source) {
-		throw new Error("Automation event type contribution requires source");
-	}
-	return {
-		...eventType,
-		eventType: normalizedEventType,
-		source,
-		examples: eventType.examples ? [...eventType.examples] : undefined,
-		metadata: eventType.metadata
-			? sanitizeObject(eventType.metadata)
-			: undefined,
-	};
-}
-
 function getPlugin(pluginId: string): PluginState {
 	const state = pluginState.get(pluginId);
 	if (!state) {
@@ -416,10 +350,7 @@ async function loadPluginDescriptor(args: {
 	pluginId: string;
 	exportName: string;
 	targeting: PluginTargeting;
-	setupCtxBase: Pick<
-		PluginSetupCtx,
-		"session" | "client" | "user" | "workspaceInfo"
-	>;
+	setupCtxBase: Pick<PluginSetupCtx, "session" | "client" | "workspaceInfo">;
 	loggerEnabled?: boolean;
 }): Promise<LoadedPluginResult> {
 	let plugin: PluginModule | undefined;
@@ -439,7 +370,6 @@ async function loadPluginDescriptor(args: {
 			rules: [],
 			messageBuilders: [],
 			providers: [],
-			automationEventTypes: [],
 			mcpServers: [],
 			shortcuts: [],
 			flags: [],
@@ -507,12 +437,6 @@ async function loadPluginDescriptor(args: {
 					metadata: sanitizeObject(provider.metadata),
 				});
 			},
-			registerAutomationEventType: (eventType) => {
-				contributions.automationEventTypes.push({
-					id: makeId(args.pluginId, "automation_event"),
-					...normalizeAutomationEventType(eventType),
-				});
-			},
 			registerMcpServer: (server) => {
 				contributions.mcpServers.push(server);
 			},
@@ -524,15 +448,6 @@ async function loadPluginDescriptor(args: {
 					...args.setupCtxBase,
 					...(args.loggerEnabled
 						? { logger: createPluginLogger(plugin.name) }
-						: {}),
-					...(plugin.manifest.capabilities.includes("automationEvents")
-						? {
-								automation: {
-									ingestEvent: (event: AutomationEventEnvelope) => {
-										emitEvent("automation_event", event);
-									},
-								},
-							}
 						: {}),
 				};
 				assertValidPluginSetupCtx(setupCtx);
@@ -593,7 +508,6 @@ async function initialize(args: {
 	cwd?: string;
 	session?: unknown;
 	client?: unknown;
-	user?: unknown;
 	workspaceInfo?: unknown;
 	loggerEnabled?: boolean;
 }): Promise<InitializeResult> {
@@ -615,7 +529,7 @@ async function initialize(args: {
 
 	// Keep the global escape-hatch in sync with the active session.
 	const sessionEnv = (globalThis as Record<string, unknown>)
-		.__clineSessionEnv as Record<string, unknown>;
+		.__bedrockCoderSessionEnv as Record<string, unknown>;
 	if (sessionEnv) {
 		sessionEnv.cwd = args.cwd;
 		sessionEnv.workspaceInfo = args.workspaceInfo;
@@ -633,7 +547,6 @@ async function initialize(args: {
 	const setupCtxBase = {
 		session: args.session,
 		client: args.client,
-		user: args.user,
 		workspaceInfo: args.workspaceInfo,
 	};
 

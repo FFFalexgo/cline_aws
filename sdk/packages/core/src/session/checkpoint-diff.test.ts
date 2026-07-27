@@ -24,8 +24,8 @@ describe("checkpoint workspace comparison", () => {
 		dir = mkdtempSync(join(tmpdir(), "core-checkpoint-diff-"));
 		mkdirSync(dir, { recursive: true });
 		git(dir, ["init"]);
-		git(dir, ["config", "user.name", "Cline Test"]);
-		git(dir, ["config", "user.email", "cline@example.com"]);
+		git(dir, ["config", "user.name", "Bedrock Coder Test"]);
+		git(dir, ["config", "user.email", "bedrockCoder@example.com"]);
 		writeFileSync(join(dir, "tracked.txt"), "base\n", "utf8");
 		writeFileSync(join(dir, "deleted.txt"), "delete me\n", "utf8");
 		git(dir, ["add", "."]);
@@ -57,18 +57,21 @@ describe("checkpoint workspace comparison", () => {
 		expect(
 			diffs.find((diff) => diff.filePath.endsWith("tracked.txt")),
 		).toMatchObject({
+			status: "modified",
 			leftContent: "base\n",
 			rightContent: "changed\n",
 		});
 		expect(
 			diffs.find((diff) => diff.filePath.endsWith("deleted.txt")),
 		).toMatchObject({
+			status: "deleted",
 			leftContent: "delete me\n",
 			rightContent: "",
 		});
 		expect(
 			diffs.find((diff) => diff.filePath.endsWith("untracked.txt")),
 		).toMatchObject({
+			status: "added",
 			leftContent: "",
 			rightContent: "new file\n",
 		});
@@ -76,7 +79,7 @@ describe("checkpoint workspace comparison", () => {
 
 	it("uses the worktree snapshot stored in SDK stash checkpoints", async () => {
 		writeFileSync(join(dir, "tracked.txt"), "checkpoint dirty\n", "utf8");
-		const stashRef = git(dir, ["stash", "create", "cline checkpoint test"]);
+		const stashRef = git(dir, ["stash", "create", "bedrockCoder checkpoint test"]);
 		writeFileSync(join(dir, "tracked.txt"), "current dirty\n", "utf8");
 
 		const diffs = await buildCheckpointWorkspaceDiff(dir, {
@@ -161,6 +164,8 @@ describe("checkpoint workspace comparison", () => {
 		});
 
 		expect(result.checkpoint.ref).toBe(checkpointRef);
+		expect(result.diverged).toBe(true);
+		expect(result.restoreRequiresApproval).toBe(true);
 		expect(result.diffs).toHaveLength(1);
 		expect(result.diffs[0]).toMatchObject({
 			filePath: join(dir, "tracked.txt"),

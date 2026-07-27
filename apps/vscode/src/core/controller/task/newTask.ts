@@ -1,8 +1,7 @@
-import { String } from "@shared/proto/cline/common"
-import { PlanActMode } from "@shared/proto/cline/state"
-import { NewTaskRequest } from "@shared/proto/cline/task"
+import { String } from "@shared/proto/bedrock_coder/common"
+import { PlanActMode } from "@shared/proto/bedrock_coder/state"
+import { NewTaskRequest } from "@shared/proto/bedrock_coder/task"
 import { Settings } from "@shared/storage/state-keys"
-import { convertProtoToApiProvider } from "@/shared/proto-conversions/models/api-configuration-conversion"
 import { DEFAULT_BROWSER_SETTINGS } from "../../../shared/BrowserSettings"
 import { Controller } from ".."
 import { normalizeOpenaiReasoningEffort } from "../state/reasoningEffort"
@@ -21,26 +20,6 @@ export async function newTask(controller: Controller, request: NewTaskRequest): 
 	const filteredTaskSettings: Partial<Settings> = Object.fromEntries(
 		Object.entries({
 			...request.taskSettings,
-			...(request.taskSettings?.autoApprovalSettings && {
-				autoApprovalSettings: (() => {
-					// Merge with global settings to ensure complete settings for new task
-					const globalSettings = controller.stateManager.getGlobalSettingsKey("autoApprovalSettings")
-					const incomingSettings = request.taskSettings.autoApprovalSettings
-					return {
-						...globalSettings,
-						...(incomingSettings.version !== undefined && { version: incomingSettings.version }),
-						...(incomingSettings.enableNotifications !== undefined && {
-							enableNotifications: incomingSettings.enableNotifications,
-						}),
-						actions: {
-							...globalSettings.actions,
-							...(incomingSettings.actions
-								? Object.fromEntries(Object.entries(incomingSettings.actions).filter(([_, v]) => v !== undefined))
-								: {}),
-						},
-					}
-				})(),
-			}),
 			...(request.taskSettings?.browserSettings && {
 				browserSettings: {
 					viewport: request.taskSettings.browserSettings.viewport || DEFAULT_BROWSER_SETTINGS.viewport,
@@ -62,12 +41,6 @@ export async function newTask(controller: Controller, request: NewTaskRequest): 
 			}),
 			...(request.taskSettings?.customPrompt === "compact" && {
 				customPrompt: "compact",
-			}),
-			...(request.taskSettings?.planModeApiProvider !== undefined && {
-				planModeApiProvider: convertProtoToApiProvider(request.taskSettings.planModeApiProvider),
-			}),
-			...(request.taskSettings?.actModeApiProvider !== undefined && {
-				actModeApiProvider: convertProtoToApiProvider(request.taskSettings.actModeApiProvider),
 			}),
 		}).filter(([_, value]) => value !== undefined),
 	)

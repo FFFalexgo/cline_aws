@@ -1,10 +1,7 @@
-import fs from "fs/promises"
 import { WebviewProvider } from "@/core/webview"
-import { writeLgWebhookConfig, writeLgWebhookHooks } from "@/services/lg-cns-integration/webhook-hooks"
 import { Logger } from "@/shared/services/Logger"
 
 export const TASK_URI_PATH = "/task"
-export const LG_TASK_URI_PATH = "/lg-task"
 
 /**
  * Shared URI handler that processes both VSCode URI events and HTTP server callbacks
@@ -28,7 +25,6 @@ export class SharedUriHandler {
 			"SharedUriHandler: Processing URI:" +
 				JSON.stringify({
 					path: path,
-					query: query,
 					scheme: parsedUrl.protocol,
 				}),
 		)
@@ -42,50 +38,6 @@ export class SharedUriHandler {
 
 		try {
 			switch (path) {
-				case "/openrouter": {
-					const code = query.get("code")
-					if (code) {
-						await visibleWebview.controller.handleOpenRouterCallback(code)
-						return true
-					}
-					Logger.warn("SharedUriHandler: Missing code parameter for OpenRouter callback")
-					return false
-				}
-				case "/requesty": {
-					const code = query.get("code")
-					if (code) {
-						await visibleWebview.controller.handleRequestyCallback(code)
-						return true
-					}
-					Logger.warn("SharedUriHandler: Missing code parameter for Requesty callback")
-					return false
-				}
-				case "/auth": {
-					const provider = query.get("provider")
-
-					Logger.info(`SharedUriHandler - Auth callback received for ${provider} - ${path}`)
-
-					const token = query.get("refreshToken") || query.get("idToken") || query.get("code")
-					if (token) {
-						await visibleWebview.controller.handleAuthCallback(token, provider)
-						return true
-					}
-					Logger.warn("SharedUriHandler: Missing idToken parameter for auth callback")
-					return false
-				}
-				case "/auth/oca": {
-					Logger.log("SharedUriHandler: Oca Auth callback received:", { path: path })
-
-					const code = query.get("code")
-					const state = query.get("state")
-
-					if (code && state) {
-						await visibleWebview.controller.handleOcaAuthCallback(code, state)
-						return true
-					}
-					Logger.warn("SharedUriHandler: Missing code parameter for auth callback")
-					return false
-				}
 				case TASK_URI_PATH: {
 					const prompt = query.get("prompt")
 					if (prompt) {
@@ -93,40 +45,6 @@ export class SharedUriHandler {
 						return true
 					}
 					Logger.warn("SharedUriHandler: Missing prompt parameter for task creation")
-					return false
-				}
-				case LG_TASK_URI_PATH: {
-					const promptFile = query.get("prompt-file")
-					const webhookUrl = query.get("webhook-url")
-					const webhookToken = query.get("webhook-token")
-
-					if (!promptFile || !webhookUrl || !webhookToken) {
-						Logger.warn("SharedUriHandler: Missing required parameters for LG task creation")
-						return false
-					}
-
-					const specContents = await fs.readFile(promptFile, "utf-8")
-					const prompt = [
-						`The following file contains the development specification you must implement: ${promptFile}`,
-						"",
-						"Start by reading that file from disk. If context compaction happens later, re-read the same file path so you can continue tracking progress against the original requirements.",
-						"",
-						"For convenience, here is the current file content:",
-						"",
-						specContents,
-					].join("\n")
-					await writeLgWebhookConfig(webhookUrl, webhookToken)
-					await writeLgWebhookHooks()
-					await visibleWebview.controller.handleTaskCreation(prompt)
-					return true
-				}
-				case "/hicap": {
-					const code = query.get("code")
-					if (code) {
-						await visibleWebview.controller.handleHicapCallback(code)
-						return true
-					}
-					Logger.warn("SharedUriHandler: Missing code parameter for Hicap callback")
 					return false
 				}
 				default:

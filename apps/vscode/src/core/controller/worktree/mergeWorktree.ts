@@ -1,8 +1,8 @@
-import { MergeWorktreeRequest, MergeWorktreeResult } from "@shared/proto/cline/worktree"
+import { MergeWorktreeRequest, MergeWorktreeResult } from "@shared/proto/bedrock_coder/worktree"
 import { listWorktrees } from "@utils/git-worktree"
 import { getWorkspacePath } from "@utils/path"
+import { inspectWorktreeMutation } from "@utils/worktree-safety"
 import simpleGit from "simple-git"
-import { telemetryService } from "@/services/telemetry"
 import { Controller } from ".."
 
 /**
@@ -43,6 +43,32 @@ export async function mergeWorktree(_controller: Controller, request: MergeWorkt
 	}
 
 	try {
+		const inspection = await inspectWorktreeMutation(cwd, {
+			operation: "merge",
+			worktreePath,
+			targetBranch,
+			affectedTaskId: request.affectedTaskId,
+			affectedAgentId: request.affectedAgentId,
+		})
+		const operationSummary = inspection.gitOperation.join(" ")
+		if (!request.approved) {
+			return MergeWorktreeResult.create({
+				success: false,
+				message: "Explicit approval is required before merging a worktree",
+				hasConflicts: false,
+				conflictingFiles: [],
+				operationSummary,
+			})
+		}
+		if (!inspection.allowed) {
+			return MergeWorktreeResult.create({
+				success: false,
+				message: inspection.reason,
+				hasConflicts: false,
+				conflictingFiles: [],
+				operationSummary,
+			})
+		}
 		// Find the worktree that has the target branch checked out
 		// This is where we need to perform the merge
 		const { worktrees } = await listWorktrees(cwd)
@@ -100,8 +126,15 @@ export async function mergeWorktree(_controller: Controller, request: MergeWorkt
 					targetBranch,
 				})
 			}
-		} catch {
-			// If status check fails, continue anyway
+		} catch (error) {
+			return MergeWorktreeResult.create({
+				success: false,
+				message: `Failed to inspect source worktree state: ${error instanceof Error ? error.message : String(error)}`,
+				hasConflicts: false,
+				conflictingFiles: [],
+				sourceBranch,
+				targetBranch,
+			})
 		}
 
 		// Check for uncommitted changes in the target worktree
@@ -117,8 +150,15 @@ export async function mergeWorktree(_controller: Controller, request: MergeWorkt
 					targetBranch,
 				})
 			}
-		} catch {
-			// If status check fails, continue anyway
+		} catch (error) {
+			return MergeWorktreeResult.create({
+				success: false,
+				message: `Failed to inspect target worktree state: ${error instanceof Error ? error.message : String(error)}`,
+				hasConflicts: false,
+				conflictingFiles: [],
+				sourceBranch,
+				targetBranch,
+			})
 		}
 
 		// Attempt the merge in the target worktree (which already has targetBranch checked out)
@@ -140,8 +180,6 @@ export async function mergeWorktree(_controller: Controller, request: MergeWorkt
 					} catch {
 						// Ignore abort errors
 					}
-
-					telemetryService.captureWorktreeMergeAttempted(false, true, deleteAfterMerge)
 					return MergeWorktreeResult.create({
 						success: false,
 						message: `Merge conflict detected. ${conflictingFiles.length} file(s) have conflicts.`,
@@ -156,7 +194,6 @@ export async function mergeWorktree(_controller: Controller, request: MergeWorkt
 			}
 
 			const errorMessage = error instanceof Error ? error.message : String(error)
-			telemetryService.captureWorktreeMergeAttempted(false, false, deleteAfterMerge)
 			return MergeWorktreeResult.create({
 				success: false,
 				message: `Merge failed: ${errorMessage}`,
@@ -170,7 +207,7 @@ export async function mergeWorktree(_controller: Controller, request: MergeWorkt
 		// Delete worktree if requested
 		if (deleteAfterMerge) {
 			try {
-				await git.raw(["worktree", "remove", worktreePath, "--force"])
+				await git.raw(["worktree", "remove", worktreePath])
 			} catch (error) {
 				// Merge succeeded but deletion failed - still return success
 				const errorMessage = error instanceof Error ? error.message : String(error)
@@ -191,8 +228,6 @@ export async function mergeWorktree(_controller: Controller, request: MergeWorkt
 				// Branch deletion is optional, don't fail if it doesn't work
 			}
 		}
-
-		telemetryService.captureWorktreeMergeAttempted(true, false, deleteAfterMerge)
 		return MergeWorktreeResult.create({
 			success: true,
 			message: deleteAfterMerge
@@ -202,6 +237,7 @@ export async function mergeWorktree(_controller: Controller, request: MergeWorkt
 			conflictingFiles: [],
 			sourceBranch,
 			targetBranch,
+			operationSummary,
 		})
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)

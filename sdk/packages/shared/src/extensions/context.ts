@@ -1,31 +1,27 @@
 import type { BasicLogger } from "../logging/logger";
-import type { ITelemetryService } from "../services/telemetry";
 import type { WorkspaceInfo } from "../session/workspace";
-import type {
-	AgentExtensionAutomationContext,
-	AgentExtensionSessionContext,
-} from "./contribution-registry";
+import type { AgentExtensionSessionContext } from "./contribution-registry";
 
 /**
- * The IDE or client surface the user is running Cline from.
+ * The IDE or client surface the user is running BedrockCoder from.
  */
 export type ClientName =
-	| "cline-vscode"
-	| "cline-jetbrains"
-	| "cline-cli"
-	| "cline-sdk"
-	| "cline-kanban"
-	| "cline-acp"
-	| "cline-platform"
+	| "bedrock-coder-vscode"
+	| "bedrock-coder-jetbrains"
+	| "bedrock-coder-cli"
+	| "bedrock-coder-sdk"
+	| "bedrock-coder-kanban"
+	| "bedrock-coder-acp"
+	| "bedrock-coder-platform"
 	| (string & {});
 
 /**
  * Identity of the calling client and host surface.
  */
 export interface ClientContext {
-	/** Client type emitted to Cline request headers, e.g. "VSCode Extension", "cline-cli", "cline-sdk" */
+	/** Client type emitted to BedrockCoder request headers, e.g. "VSCode Extension", "bedrock-coder-cli", "bedrock-coder-sdk" */
 	name: ClientName;
-	/** Cline client/extension semver string, e.g. "3.12.0" */
+	/** BedrockCoder client/extension semver string, e.g. "3.12.0" */
 	version?: string;
 	/** Host platform display name, e.g. "Visual Studio Code", "Cursor", "cli" */
 	platform?: string;
@@ -36,20 +32,10 @@ export interface ClientContext {
 }
 
 /**
- * Identity of the authenticated user.
- */
-export interface UserContext {
-	/** PostHog / analytics distinct ID */
-	distinctId?: string;
-	email?: string;
-	organizationId?: string;
-}
-
-/**
  * Everything needed to describe the workspace and build the system prompt.
  *
  * Extends WorkspaceInfo (rootPath + git fields) with the additional fields
- * required by buildClineSystemPrompt, so callers can spread a WorkspaceInfo
+ * required by buildBedrockCoderSystemPrompt, so callers can spread a WorkspaceInfo
  * and add only what they know.
  */
 export interface WorkspaceContext extends WorkspaceInfo {
@@ -61,11 +47,11 @@ export interface WorkspaceContext extends WorkspaceInfo {
 	/** Human-readable workspace name shown in the system prompt */
 	workspaceName?: string;
 	/**
-	 * Pre-serialized workspace metadata block that replaces {{CLINE_METADATA}}
+	 * Pre-serialized workspace metadata block that replaces {{BEDROCK_CODER_METADATA}}
 	 * in the system prompt template.
 	 */
 	metadata?: string;
-	/** Agent mode: "act" | "plan" | "yolo" */
+	/** Agent mode: "act" | "plan" */
 	mode?: string;
 	/** Additional rules/instructions injected into the system prompt */
 	rules?: string;
@@ -78,21 +64,13 @@ export interface WorkspaceContext extends WorkspaceInfo {
 /**
  * Ambient runtime context carried alongside ProviderConfig.
  *
- * Captures who is calling (user + client), where they are (workspace),
- * and which services to use for logging and telemetry. None of these
+ * Captures the client surface, workspace, and local services that do not
  * belong in the LLM provider credential config.
  */
 export interface ExtensionContext {
-	user?: UserContext;
 	client?: ClientContext;
 	workspace?: WorkspaceContext;
 	/** Core session metadata forwarded into plugin setup context. */
 	session?: AgentExtensionSessionContext;
-	/**
-	 * Host-provided automation ingress for plugins. Present when the session is
-	 * started through a ClineCore instance with automation enabled.
-	 */
-	automation?: AgentExtensionAutomationContext;
 	logger?: BasicLogger;
-	telemetry?: ITelemetryService;
 }

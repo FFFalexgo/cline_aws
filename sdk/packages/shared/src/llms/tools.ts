@@ -10,11 +10,6 @@ export interface ToolPolicy {
 	 * @default true
 	 */
 	enabled?: boolean;
-	/**
-	 * Whether this tool can run without asking the client for approval.
-	 * @default true
-	 */
-	autoApprove?: boolean;
 }
 
 // =============================================================================
@@ -58,7 +53,7 @@ export interface ToolApprovalRequest {
 	 * Agent instance identifier.
 	 *
 	 * This identifies the lead or delegated agent that requested the tool call.
-	 * It is used for attribution in approval prompts, events, telemetry, and
+	 * It is used for attribution in approval prompts, events, and
 	 * team/sub-agent flows. It is not a hub routing key and should not be used
 	 * to find the owning runtime session.
 	 */
@@ -67,7 +62,7 @@ export interface ToolApprovalRequest {
 	 * Agent conversation/transcript identifier.
 	 *
 	 * This identifies the model conversation that produced the tool call. Tools,
-	 * hooks, telemetry, and persisted session metadata use it to correlate work
+	 * hooks and persisted session metadata use it to correlate work
 	 * with the agent's message history. It is contextual data, not the hub event
 	 * routing key.
 	 */

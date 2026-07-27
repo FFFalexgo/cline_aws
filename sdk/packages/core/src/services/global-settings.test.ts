@@ -1,8 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ITelemetryService } from "@cline/shared";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	GlobalSettingsSchema,
 	readCompactionStrategyGlobally,
@@ -11,15 +10,14 @@ import {
 	setCompactionStrategyGlobally,
 	setDisabledPlugin,
 	setDisabledTools,
-	setTelemetryOptOutGlobally,
 	writeGlobalSettings,
 } from "./global-settings";
 
 describe("global-settings", () => {
-	const previousGlobalSettingsPath = process.env.CLINE_GLOBAL_SETTINGS_PATH;
+	const previousGlobalSettingsPath = process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH;
 
 	afterEach(() => {
-		process.env.CLINE_GLOBAL_SETTINGS_PATH = previousGlobalSettingsPath;
+		process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = previousGlobalSettingsPath;
 	});
 
 	it("defines the global settings file schema", () => {
@@ -32,17 +30,9 @@ describe("global-settings", () => {
 			autoUpdateEnabled: true,
 			disabledPlugins: ["/plugins/example.js"],
 			disabledTools: ["editor", "read_files"],
-			telemetryOptOut: false,
 		});
-		expect(
-			GlobalSettingsSchema.parse({
-				disabledTools: [],
-				telemetryOptOut: true,
-			}),
-		).toEqual({ autoUpdateEnabled: true, telemetryOptOut: true });
 		expect(GlobalSettingsSchema.parse({ disabledTools: [] })).toEqual({
 			autoUpdateEnabled: true,
-			telemetryOptOut: false,
 		});
 		expect(
 			GlobalSettingsSchema.parse({
@@ -54,17 +44,14 @@ describe("global-settings", () => {
 			autoUpdateEnabled: true,
 			compactionStrategy: "agentic",
 			disabledTools: ["read_files"],
-			telemetryOptOut: false,
 		});
 		expect(
 			GlobalSettingsSchema.parse({
 				disabledTools: 42,
 				extra: true,
-				telemetryOptOut: true,
 			}),
 		).toEqual({
 			autoUpdateEnabled: true,
-			telemetryOptOut: true,
 		});
 		expect(
 			GlobalSettingsSchema.parse({
@@ -72,7 +59,6 @@ describe("global-settings", () => {
 			}),
 		).toEqual({
 			autoUpdateEnabled: false,
-			telemetryOptOut: false,
 		});
 	});
 
@@ -80,7 +66,7 @@ describe("global-settings", () => {
 		const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
 		try {
 			const settingsPath = join(root, "global-settings.json");
-			process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+			process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = settingsPath;
 
 			writeGlobalSettings({
 				disabledTools: [" editor ", "read_files", "editor"],
@@ -90,12 +76,10 @@ describe("global-settings", () => {
 			expect(readGlobalSettings()).toEqual({
 				autoUpdateEnabled: true,
 				disabledTools: ["editor", "read_files"],
-				telemetryOptOut: false,
 			});
 			expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
 				autoUpdateEnabled: true,
 				disabledTools: ["editor", "read_files"],
-				telemetryOptOut: false,
 			});
 
 			await writeFile(
@@ -103,13 +87,11 @@ describe("global-settings", () => {
 				JSON.stringify({
 					disabledTools: ["read_files"],
 					extra: true,
-					telemetryOptOut: true,
 				}),
 			);
 			expect(readGlobalSettings()).toEqual({
 				autoUpdateEnabled: true,
 				disabledTools: ["read_files"],
-				telemetryOptOut: true,
 			});
 
 			await writeFile(
@@ -117,12 +99,10 @@ describe("global-settings", () => {
 				JSON.stringify({
 					disabledTools: 42,
 					extra: true,
-					telemetryOptOut: true,
 				}),
 			);
 			expect(readGlobalSettings()).toEqual({
 				autoUpdateEnabled: true,
-				telemetryOptOut: true,
 			});
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -133,7 +113,7 @@ describe("global-settings", () => {
 		const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
 		try {
 			const settingsPath = join(root, "global-settings.json");
-			process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+			process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = settingsPath;
 
 			setDisabledPlugin("/plugins/example.js", true);
 			setDisabledTools(["read_files", "editor"], true);
@@ -143,38 +123,11 @@ describe("global-settings", () => {
 				autoUpdateEnabled: true,
 				disabledPlugins: ["/plugins/example.js"],
 				disabledTools: ["read_files"],
-				telemetryOptOut: false,
 			});
 			expect(JSON.parse(await readFile(settingsPath, "utf8"))).toEqual({
 				autoUpdateEnabled: true,
 				disabledPlugins: ["/plugins/example.js"],
 				disabledTools: ["read_files"],
-				telemetryOptOut: false,
-			});
-		} finally {
-			await rm(root, { recursive: true, force: true });
-		}
-	});
-
-	it("records telemetry opt-out once when the setting changes to true", async () => {
-		const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
-		try {
-			const settingsPath = join(root, "global-settings.json");
-			process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
-			const captureRequired = vi.fn();
-			const telemetry = {
-				captureRequired,
-			} as unknown as ITelemetryService;
-
-			setTelemetryOptOutGlobally(true, { telemetry });
-			setTelemetryOptOutGlobally(true, { telemetry });
-			setTelemetryOptOutGlobally(false, { telemetry });
-
-			expect(captureRequired).toHaveBeenCalledTimes(1);
-			expect(captureRequired).toHaveBeenCalledWith("user.opt_out", undefined);
-			expect(readGlobalSettings()).toEqual({
-				autoUpdateEnabled: true,
-				telemetryOptOut: false,
 			});
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -185,18 +138,16 @@ describe("global-settings", () => {
 		const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
 		try {
 			const settingsPath = join(root, "global-settings.json");
-			process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+			process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = settingsPath;
 
 			writeGlobalSettings({
 				disabledTools: ["editor"],
-				telemetryOptOut: true,
 			});
 			setAutoUpdateEnabledGlobally(false);
 
 			expect(readGlobalSettings()).toEqual({
 				autoUpdateEnabled: false,
 				disabledTools: ["editor"],
-				telemetryOptOut: true,
 			});
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -207,7 +158,7 @@ describe("global-settings", () => {
 		const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
 		try {
 			const settingsPath = join(root, "global-settings.json");
-			process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+			process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = settingsPath;
 
 			expect(readCompactionStrategyGlobally()).toBe("agentic");
 			setCompactionStrategyGlobally("agentic");
@@ -222,7 +173,7 @@ describe("global-settings", () => {
 			const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
 			try {
 				const settingsPath = join(root, "global-settings.json");
-				process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+				process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = settingsPath;
 				writeGlobalSettings({ disabledTools: ["editor"] });
 				readGlobalSettings();
 
@@ -231,7 +182,6 @@ describe("global-settings", () => {
 				expect(readGlobalSettings()).toEqual({
 					autoUpdateEnabled: true,
 					disabledTools: ["read_files"],
-					telemetryOptOut: false,
 				});
 			} finally {
 				await rm(root, { recursive: true, force: true });
@@ -242,7 +192,7 @@ describe("global-settings", () => {
 			const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
 			try {
 				const settingsPath = join(root, "global-settings.json");
-				process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+				process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = settingsPath;
 				writeGlobalSettings({ disabledTools: ["editor"] });
 				readGlobalSettings();
 
@@ -254,7 +204,6 @@ describe("global-settings", () => {
 				expect(readGlobalSettings()).toEqual({
 					autoUpdateEnabled: true,
 					disabledTools: ["read_files"],
-					telemetryOptOut: false,
 				});
 			} finally {
 				await rm(root, { recursive: true, force: true });
@@ -268,27 +217,24 @@ describe("global-settings", () => {
 				const pathA = join(rootA, "global-settings.json");
 				const pathB = join(rootB, "global-settings.json");
 
-				process.env.CLINE_GLOBAL_SETTINGS_PATH = pathA;
+				process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = pathA;
 				writeGlobalSettings({ disabledTools: ["editor"] });
 				expect(readGlobalSettings()).toEqual({
 					autoUpdateEnabled: true,
 					disabledTools: ["editor"],
-					telemetryOptOut: false,
 				});
 
-				process.env.CLINE_GLOBAL_SETTINGS_PATH = pathB;
+				process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = pathB;
 				writeGlobalSettings({ disabledTools: ["read_files"] });
 				expect(readGlobalSettings()).toEqual({
 					autoUpdateEnabled: true,
 					disabledTools: ["read_files"],
-					telemetryOptOut: false,
 				});
 
-				process.env.CLINE_GLOBAL_SETTINGS_PATH = pathA;
+				process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = pathA;
 				expect(readGlobalSettings()).toEqual({
 					autoUpdateEnabled: true,
 					disabledTools: ["editor"],
-					telemetryOptOut: false,
 				});
 			} finally {
 				await rm(rootA, { recursive: true, force: true });
@@ -300,15 +246,13 @@ describe("global-settings", () => {
 			const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
 			try {
 				const settingsPath = join(root, "missing-global-settings.json");
-				process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+				process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = settingsPath;
 
 				expect(readGlobalSettings()).toEqual({
 					autoUpdateEnabled: true,
-					telemetryOptOut: false,
 				});
 				expect(readGlobalSettings()).toEqual({
 					autoUpdateEnabled: true,
-					telemetryOptOut: false,
 				});
 			} finally {
 				await rm(root, { recursive: true, force: true });
@@ -319,7 +263,7 @@ describe("global-settings", () => {
 			const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
 			try {
 				const settingsPath = join(root, "global-settings.json");
-				process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+				process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = settingsPath;
 				writeGlobalSettings({
 					disabledTools: ["editor"],
 					disabledPlugins: ["/plugins/example.js"],
@@ -330,9 +274,6 @@ describe("global-settings", () => {
 				expect(Object.isFrozen(settings)).toBe(true);
 				expect(Object.isFrozen(settings.disabledTools)).toBe(true);
 				expect(Object.isFrozen(settings.disabledPlugins)).toBe(true);
-				expect(() => {
-					(settings as { telemetryOptOut: boolean }).telemetryOptOut = true;
-				}).toThrow();
 				expect(() => {
 					settings.disabledTools?.push("malicious");
 				}).toThrow();
@@ -345,11 +286,10 @@ describe("global-settings", () => {
 			const root = await mkdtemp(join(tmpdir(), "core-global-settings-"));
 			try {
 				const settingsPath = join(root, "global-settings.json");
-				process.env.CLINE_GLOBAL_SETTINGS_PATH = settingsPath;
+				process.env.BEDROCK_CODER_GLOBAL_SETTINGS_PATH = settingsPath;
 
 				expect(readGlobalSettings()).toEqual({
 					autoUpdateEnabled: true,
-					telemetryOptOut: false,
 				});
 
 				await writeFile(
@@ -360,7 +300,6 @@ describe("global-settings", () => {
 				expect(readGlobalSettings()).toEqual({
 					autoUpdateEnabled: true,
 					disabledTools: ["editor"],
-					telemetryOptOut: false,
 				});
 			} finally {
 				await rm(root, { recursive: true, force: true });

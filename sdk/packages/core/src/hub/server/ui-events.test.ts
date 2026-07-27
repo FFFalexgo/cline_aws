@@ -1,8 +1,7 @@
-import type { HubUINotifyPayload } from "@cline/shared";
+import type { HubUINotifyPayload } from "@bedrock-coder/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionSource } from "../../types/common";
 import { HubUIClient } from "../client/ui-client";
-import { createLocalHubScheduleRuntimeHandlers } from "../daemon/runtime-handlers";
 import { startHubServer } from "../daemon/start-shared-server";
 
 function waitForEvent<T>(
@@ -34,7 +33,6 @@ describe("hub UI events", () => {
 		// Start a real hub server
 		const server = await startHubServer({
 			port: 0,
-			runtimeHandlers: createLocalHubScheduleRuntimeHandlers(),
 		});
 		servers.push(server);
 
@@ -78,7 +76,6 @@ describe("hub UI events", () => {
 	it("broadcasts ui.show_window event to subscribed clients", async () => {
 		const server = await startHubServer({
 			port: 0,
-			runtimeHandlers: createLocalHubScheduleRuntimeHandlers(),
 		});
 		servers.push(server);
 
@@ -110,7 +107,6 @@ describe("hub UI events", () => {
 	it("receives hub.client.registered events when clients connect", async () => {
 		const server = await startHubServer({
 			port: 0,
-			runtimeHandlers: createLocalHubScheduleRuntimeHandlers(),
 		});
 		servers.push(server);
 
@@ -151,7 +147,7 @@ describe("hub UI events", () => {
 			updatedAt: new Date(0).toISOString(),
 			status: "running" as const,
 			interactive: true,
-			provider: "cline",
+			provider: "bedrockCoder",
 			model: "test-model",
 			cwd: "/tmp/project",
 			workspaceRoot: "/tmp/project",
@@ -162,7 +158,6 @@ describe("hub UI events", () => {
 		};
 		const server = await startHubServer({
 			port: 0,
-			runtimeHandlers: createLocalHubScheduleRuntimeHandlers(),
 			sessionHost: {
 				subscribe: () => () => {},
 				startSession: async () => {

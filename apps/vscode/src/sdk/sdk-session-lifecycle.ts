@@ -1,19 +1,10 @@
-import type {
-	CoreSessionEvent,
-	ITelemetryService,
-	PreparedRemoteConfigCoreIntegration,
-	RestoreInput,
-	RestoreResult,
-	StartSessionResult,
-} from "@cline/core"
-import { formatModeSwitchNotice, type ModeSwitchNotice } from "@cline/shared"
-import { StateManager } from "@/core/storage/StateManager"
+import type { CoreSessionEvent, RestoreInput, RestoreResult, StartSessionResult } from "@bedrock-coder/core"
+import { formatModeSwitchNotice, type ModeSwitchNotice } from "@bedrock-coder/shared"
 import type { VscodeTerminalManager } from "@/hosts/vscode/terminal/VscodeTerminalManager"
 import { McpHub } from "@/services/mcp/McpHub"
 import { Logger } from "@/shared/services/Logger"
-import type { ActiveSession } from "./cline-session-factory"
+import type { ActiveSession } from "./bedrock-coder-session-factory"
 import type { SdkForegroundCommandCoordinator } from "./sdk-foreground-command-coordinator"
-import { buildToolPolicies } from "./sdk-tool-policies"
 import type { SdkSessionHost } from "./session-host"
 import { VscodeSessionHost } from "./vscode-session-host"
 
@@ -35,11 +26,8 @@ export interface SdkSessionLifecycleOptions {
 	getTerminalManager?: () => VscodeTerminalManager
 	/** Registry of in-flight foreground executions for "Proceed While Running". */
 	foregroundCommands?: SdkForegroundCommandCoordinator
-	/** Returns the latest prepared remote-config integration, if remote config is active. */
-	getRemoteConfigIntegration?: () => PreparedRemoteConfigCoreIntegration | undefined
-	/** Shared SDK telemetry service owned by SdkController. */
-	telemetry?: ITelemetryService
 	onSendStart?: (sessionId: string) => void
+	onRequestSent?: (sessionId: string) => void
 	onSendComplete: (sessionId: string) => Promise<void> | void
 	onSendError: (error: unknown, sessionId: string) => Promise<void> | void
 	/**
@@ -139,14 +127,10 @@ export class SdkSessionLifecycle {
 			await pendingStop
 		}
 
-		const autoApprovalSettings = StateManager.get().getGlobalSettingsKey("autoApprovalSettings")
-		const toolPolicies = autoApprovalSettings ? buildToolPolicies(autoApprovalSettings, this.options.mcpHub) : undefined
-
 		const sdkHost = await this.getOrCreateSharedHost()
 
 		const startResult = await sdkHost.start({
 			...startInput,
-			...(toolPolicies ? { toolPolicies } : {}),
 		})
 		this.activeSession = {
 			sessionId: startResult.sessionId,
@@ -326,8 +310,6 @@ export class SdkSessionLifecycle {
 				applyPatchExecutor: this.options.applyPatchExecutor,
 				getTerminalManager: this.options.getTerminalManager,
 				foregroundCommands: this.options.foregroundCommands,
-				getRemoteConfigIntegration: this.options.getRemoteConfigIntegration,
-				telemetry: this.options.telemetry,
 			})
 				.then((sdkHost) => {
 					this.ensureSharedHostSubscription(sdkHost)
@@ -373,14 +355,15 @@ export class SdkSessionLifecycle {
 		const notice = this.options.consumeModeSwitchNotice?.(sessionId)
 		const noticedPrompt = notice ? `${formatModeSwitchNotice(notice.from, notice.to)}\n${prompt}` : prompt
 		this.options.onSendStart?.(sessionId)
-		sdkHost
-			.send({
-				sessionId,
-				prompt: noticedPrompt,
-				userImages: images,
-				userFiles: files,
-				delivery,
-			})
+		const sendPromise = sdkHost.send({
+			sessionId,
+			prompt: noticedPrompt,
+			userImages: images,
+			userFiles: files,
+			delivery,
+		})
+		this.options.onRequestSent?.(sessionId)
+		sendPromise
 			.then(async () => {
 				if (delivery === "queue" || delivery === "steer") {
 					Logger.log(`[SdkController] Message queued for session: ${sessionId}`)

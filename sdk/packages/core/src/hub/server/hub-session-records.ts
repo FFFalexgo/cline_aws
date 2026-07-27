@@ -2,7 +2,7 @@ import type {
 	SessionRecord as HubSessionRecord,
 	JsonValue,
 	SessionParticipant,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import type { SessionAccumulatedUsage } from "../../runtime/host/runtime-host";
 import type { SessionRecord as LocalSessionRecord } from "../../types/sessions";
 
@@ -80,7 +80,7 @@ export function toHubSessionRecord(
 			enableTeams: session.enableTeams,
 			mode:
 				typeof session.metadata?.mode === "string"
-					? (session.metadata.mode as "act" | "plan" | "yolo")
+					? (session.metadata.mode as "act" | "plan")
 					: undefined,
 			systemPrompt:
 				typeof session.metadata?.systemPrompt === "string"

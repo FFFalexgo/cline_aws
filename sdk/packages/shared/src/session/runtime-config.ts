@@ -1,6 +1,6 @@
 import type { ToolPolicy } from "../llms/tools";
 
-export type AgentMode = "act" | "plan" | "yolo" | "zen";
+export type AgentMode = "act" | "plan";
 export type RuntimeConfigExtensionKind =
 	| "rules"
 	| "skills"
@@ -64,6 +64,8 @@ export interface SessionExecutionConfig {
 	teamName?: string;
 	missionLogIntervalSteps?: number;
 	missionLogIntervalMs?: number;
+	/** Maximum child-team runs executing locally at once; additional runs stay queued. */
+	maxConcurrentTeamRuns?: number;
 	maxConsecutiveMistakes?: number;
 	toolPolicies?: Record<string, ToolPolicy>;
 }

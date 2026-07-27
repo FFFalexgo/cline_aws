@@ -11,7 +11,7 @@ import type {
 	HubClientToolContribution,
 	HubClientToolExecutorContribution,
 	JsonValue,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import {
 	HUB_CHECKPOINT_CAPABILITY,
 	HUB_COMPACTION_CAPABILITY,
@@ -21,7 +21,7 @@ import {
 	HUB_TOOL_EXECUTOR_CAPABILITY_PREFIX,
 	HUB_USER_INSTRUCTIONS_SNAPSHOT_CAPABILITY,
 	isHubToolExecutorName,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 
 export {
 	HUB_CHECKPOINT_CAPABILITY,
@@ -31,7 +31,7 @@ export {
 	HUB_MISTAKE_LIMIT_CAPABILITY,
 	HUB_TOOL_EXECUTOR_CAPABILITY_PREFIX,
 	HUB_USER_INSTRUCTIONS_SNAPSHOT_CAPABILITY,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 
 import type {
 	AvailableRuntimeCommand,
@@ -51,7 +51,6 @@ import type {
 	RuntimeSessionConfig,
 } from "../../runtime/host/runtime-host";
 import { formatRulesForSystemPrompt } from "../../runtime/safety/rules";
-import { CLINE_INTERNAL_TELEMETRY_METADATA_KEY } from "../../services/telemetry/tool-context";
 import type { CoreSessionConfig } from "../../types/config";
 
 type RequestCapability = (
@@ -220,9 +219,6 @@ function serializeToolContext(
 	context: AgentToolContext,
 ): Record<string, unknown> {
 	const metadata = context.metadata ? { ...context.metadata } : undefined;
-	if (metadata) {
-		delete metadata[CLINE_INTERNAL_TELEMETRY_METADATA_KEY];
-	}
 	return {
 		agentId: context.agentId,
 		conversationId: context.conversationId,
@@ -386,7 +382,7 @@ function createUserInstructionServiceProxy(
 		createSkillsExecutor: (allowedSkillNames) =>
 			createSnapshotSkillsExecutor(snapshot, allowedSkillNames),
 		createExtension: (options): AgentExtension => ({
-			name: "cline-hub-user-instructions",
+			name: "bedrock-coder-hub-user-instructions",
 			manifest: {
 				capabilities: [
 					options.includeRules ? "rules" : undefined,
@@ -401,7 +397,7 @@ function createUserInstructionServiceProxy(
 			setup(api) {
 				if (options.includeRules) {
 					api.registerRule({
-						id: "cline-hub-user-instructions:rules",
+						id: "bedrock-coder-hub-user-instructions:rules",
 						source: "hub-user-instructions",
 						content: () =>
 							formatRulesForSystemPrompt(

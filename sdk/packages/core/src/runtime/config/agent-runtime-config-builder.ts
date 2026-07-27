@@ -1,6 +1,6 @@
 /**
  * Build an `AgentRuntimeConfig` from an `AgentConfig` plus session-owned
- * supporting objects (model handler, tools, hooks, plugins, telemetry).
+ * supporting objects (model handler, tools, hooks, and plugins).
  *
  * The function is intentionally **pure**: it does not create handlers or tools
  * itself; it receives them already resolved from the caller (`SessionRuntime`)
@@ -22,9 +22,8 @@ import type {
 	AgentRuntimePrepareTurnContext,
 	AgentRuntimePrepareTurnResult,
 	AgentTool,
-	BasicLogger,
-	ITelemetryService,
-} from "@cline/shared";
+	BasicLogger
+} from "@bedrock-coder/shared";
 
 /**
  * Inputs required to assemble an `AgentRuntimeConfig`. Distinct from
@@ -41,7 +40,7 @@ export interface CreateAgentRuntimeConfigInput {
 	readonly sessionId?: string;
 	readonly agentId: string;
 	/**
-	 * Agent conversation/transcript identifier used by tools, hooks, telemetry,
+	 * Agent conversation/transcript identifier used by tools and hooks,
 	 * and model history correlation.
 	 */
 	readonly conversationId?: string;
@@ -51,7 +50,6 @@ export interface CreateAgentRuntimeConfigInput {
 	/** Pre-built model adapter (produced by `apiHandlerToAgentModel`). */
 	readonly model: AgentModel;
 	readonly logger?: BasicLogger;
-	readonly telemetry?: ITelemetryService;
 	/** Pre-built tool array (builtins + plugin-contributed + session extras). */
 	readonly tools?: readonly AgentTool<unknown, unknown>[];
 	readonly toolContextMetadata?: Record<string, unknown>;
@@ -96,6 +94,7 @@ export function createAgentRuntimeConfig(
 		conversationId: input.conversationId,
 		parentAgentId: input.parentAgentId,
 		agentRole: input.agentRole,
+		mode: agentConfig.mode,
 		systemPrompt: input.systemPrompt ?? agentConfig.systemPrompt,
 		messageModelInfo,
 		model: input.model,
@@ -106,7 +105,6 @@ export function createAgentRuntimeConfig(
 		consumePendingUserMessage: agentConfig.consumePendingUserMessage,
 		plugins: input.plugins,
 		logger: input.logger ?? agentConfig.logger,
-		telemetry: input.telemetry ?? agentConfig.telemetry,
 		initialMessages: input.initialMessages,
 		completionPolicy: agentConfig.completionPolicy,
 		maxIterations: agentConfig.maxIterations,

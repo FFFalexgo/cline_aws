@@ -8,7 +8,7 @@ import type {
 	AgentTool,
 	AgentToolContext,
 	Message,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import {
 	afterAll,
 	beforeAll,
@@ -24,7 +24,6 @@ function createApiCapture() {
 	const tools: AgentTool[] = [];
 	const rules: AgentExtensionRule[] = [];
 	const messageBuilders: AgentExtensionMessageBuilder<Message[]>[] = [];
-	const automationEventTypes: unknown[] = [];
 	const api = {
 		registerTool: (tool: AgentTool) => tools.push(tool),
 		registerCommand: () => {},
@@ -33,11 +32,9 @@ function createApiCapture() {
 		) => messageBuilders.push(builder),
 		registerRule: (rule: AgentExtensionRule) => rules.push(rule),
 		registerProvider: () => {},
-		registerAutomationEventType: (eventType: unknown) =>
-			automationEventTypes.push(eventType),
 		registerMcpServer: () => {},
 	};
-	return { tools, rules, messageBuilders, automationEventTypes, api };
+	return { tools, rules, messageBuilders, api };
 }
 
 function makeSnapshot() {
@@ -103,7 +100,7 @@ describe("plugin-sandbox", () => {
 				"      description: 'emit host event',",
 				"      inputSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] },",
 				"      execute: async (input) => {",
-				"        globalThis.__clinePluginHost?.emitEvent?.('test_event', { value: input.value });",
+				"        globalThis.__bedrockCoderPluginHost?.emitEvent?.('test_event', { value: input.value });",
 				"        return { ok: true };",
 				"      },",
 				"    });",
@@ -120,7 +117,7 @@ describe("plugin-sandbox", () => {
 				"  name: 'sandbox-run-end',",
 				"  manifest: { capabilities: ['hooks'] },",
 				"  hooks: { afterRun(ctx) {",
-				"    globalThis.__clinePluginHost?.emitEvent?.('run_end_hook', {",
+				"    globalThis.__bedrockCoderPluginHost?.emitEvent?.('run_end_hook', {",
 				"      finishReason: ctx.result?.status,",
 				"      iterations: ctx.result?.iterations,",
 				"    });",
@@ -166,41 +163,6 @@ describe("plugin-sandbox", () => {
 				"      content: async () => {",
 				"        resolveCount += 1;",
 				"        return 'Lazy sandbox rule ' + resolveCount;",
-				"      },",
-				"    });",
-				"  },",
-				"};",
-			].join("\n"),
-			"utf8",
-		);
-
-		await writeFile(
-			join(dir, "plugin-automation-events.mjs"),
-			[
-				"export default {",
-				"  name: 'sandbox-automation-events',",
-				"  manifest: { capabilities: ['automationEvents','tools'] },",
-				"  setup(api, ctx) {",
-				"    api.registerAutomationEventType({",
-				"      eventType: 'local.plugin_event',",
-				"      source: 'local-plugin',",
-				"      description: 'Local event emitted by a sandbox plugin',",
-				"      attributesSchema: { type: 'object', properties: { topic: { type: 'string' } } },",
-				"    });",
-				"    api.registerTool({",
-				"      name: 'emit_automation_event',",
-				"      description: 'emit automation event',",
-				"      inputSchema: { type: 'object', properties: { topic: { type: 'string' } }, required: ['topic'] },",
-				"      execute: async (input) => {",
-				"        await ctx.automation?.ingestEvent?.({",
-				"          eventId: 'plugin-' + input.topic,",
-				"          eventType: 'local.plugin_event',",
-				"          source: 'local-plugin',",
-				"          subject: input.topic,",
-				"          occurredAt: '2026-04-24T10:00:00.000Z',",
-				"          attributes: { topic: input.topic },",
-				"        });",
-				"        return { ok: true };",
 				"      },",
 				"    });",
 				"  },",
@@ -257,12 +219,12 @@ describe("plugin-sandbox", () => {
 			"utf8",
 		);
 
-		const sdkDepDir = join(dir, "node_modules", "@cline", "shared");
+		const sdkDepDir = join(dir, "node_modules", "@bedrockCoder", "shared");
 		await mkdir(sdkDepDir, { recursive: true });
 		await writeFile(
 			join(sdkDepDir, "package.json"),
 			JSON.stringify({
-				name: "@cline/shared",
+				name: "@bedrock-coder/shared",
 				type: "module",
 				exports: "./index.js",
 			}),
@@ -276,7 +238,7 @@ describe("plugin-sandbox", () => {
 		await writeFile(
 			join(dir, "plugin-sdk.ts"),
 			[
-				"import { sdkMarker } from '@cline/shared';",
+				"import { sdkMarker } from '@bedrock-coder/shared';",
 				"export default {",
 				"  name: sdkMarker,",
 				"  manifest: { capabilities: ['tools'] },",
@@ -288,10 +250,10 @@ describe("plugin-sandbox", () => {
 		await writeFile(
 			join(dir, "plugin-host-dep.ts"),
 			[
-				"import { resolveClineDataDir } from '@cline/shared/storage';",
+				"import { resolveBedrockCoderDataDir } from '@bedrock-coder/shared/storage';",
 				"import YAML from 'yaml';",
 				"export default {",
-				"  name: YAML.stringify({ host: !!resolveClineDataDir() }).trim(),",
+				"  name: YAML.stringify({ host: !!resolveBedrock CoderDataDir() }).trim(),",
 				"  manifest: { capabilities: ['tools'] },",
 				"};",
 			].join("\n"),
@@ -301,7 +263,7 @@ describe("plugin-sandbox", () => {
 		await writeFile(
 			join(dir, "plugin-create-tool.ts"),
 			[
-				"import { createTool } from '@cline/agents';",
+				"import { createTool } from '@bedrock-coder/agents';",
 				"export default {",
 				"  name: 'sandbox-create-tool',",
 				"  manifest: { capabilities: ['tools'] },",
@@ -347,7 +309,7 @@ describe("plugin-sandbox", () => {
 			[
 				"export default {",
 				"  name: 'sandbox-targeted',",
-				"  manifest: { capabilities: ['tools'], providerIds: ['openai'], modelIds: ['gpt-5.4'] },",
+				"  manifest: { capabilities: ['tools'], providerIds: ['bedrock'], modelIds: ['anthropic.claude-sonnet-4-6'] },",
 				"};",
 			].join("\n"),
 			"utf8",
@@ -358,7 +320,6 @@ describe("plugin-sandbox", () => {
 				join(dir, "plugin.mjs"),
 				join(dir, "plugin-events.mjs"),
 				join(dir, "plugin-run-end.mjs"),
-				join(dir, "plugin-automation-events.mjs"),
 				join(dir, "plugin-message-builder.mjs"),
 				join(dir, "plugin-rules.mjs"),
 				join(dir, "plugin-ts.ts"),
@@ -447,7 +408,7 @@ describe("plugin-sandbox", () => {
 		}
 	});
 
-	it("respects CLINE_PLUGIN_IMPORT_TIMEOUT_MS env var when options.importTimeoutMs is unset", async () => {
+	it("respects BEDROCK_CODER_PLUGIN_IMPORT_TIMEOUT_MS env var when options.importTimeoutMs is unset", async () => {
 		const envDir = await mkdtemp(
 			join(tmpdir(), "core-plugin-sandbox-import-env-"),
 		);
@@ -470,7 +431,7 @@ describe("plugin-sandbox", () => {
 			// Set env override well below the 4000 ms hardcoded default.
 			// If the env var isn't read, this test would block for ~4 s and
 			// the per-test timeout (3000 ms below) would fail it.
-			vi.stubEnv("CLINE_PLUGIN_IMPORT_TIMEOUT_MS", "150");
+			vi.stubEnv("BEDROCK_CODER_PLUGIN_IMPORT_TIMEOUT_MS", "150");
 			await expect(
 				loadSandboxedPlugins({ pluginPaths: [pluginPath] }),
 			).rejects.toThrow(/timed out/i);
@@ -499,7 +460,7 @@ describe("plugin-sandbox", () => {
 	});
 
 	it("resolves sandbox bootstrap from the npm wrapper platform package", async () => {
-		const previousWrapperPath = process.env.CLINE_WRAPPER_PATH;
+		const previousWrapperPath = process.env.BEDROCK_CODER_WRAPPER_PATH;
 		const wrapperRoot = await mkdtemp(
 			join(tmpdir(), "core-plugin-sandbox-wrapper-"),
 		);
@@ -508,7 +469,7 @@ describe("plugin-sandbox", () => {
 		const packageRoot = join(
 			wrapperRoot,
 			"node_modules",
-			"@cline",
+			"@bedrockCoder",
 			`cli-${platform}-${process.arch}`,
 		);
 		const wrapperBinDir = join(wrapperRoot, "bin");
@@ -517,7 +478,7 @@ describe("plugin-sandbox", () => {
 			"extensions",
 			"plugin-sandbox-bootstrap.js",
 		);
-		const wrapperPath = join(wrapperBinDir, "cline");
+		const wrapperPath = join(wrapperBinDir, "bedrockCoder");
 		const events: Array<{ name: string; payload?: unknown }> = [];
 
 		try {
@@ -527,7 +488,7 @@ describe("plugin-sandbox", () => {
 			await writeFile(
 				join(packageRoot, "package.json"),
 				JSON.stringify({
-					name: `@cline/cli-${platform}-${process.arch}`,
+					name: `@bedrock-coder/cli-${platform}-${process.arch}`,
 					version: "0.0.0-test",
 					type: "module",
 				}),
@@ -550,7 +511,7 @@ describe("plugin-sandbox", () => {
 					"        pluginPath: 'wrapper-bootstrap',",
 					"        name: 'wrapper-bootstrap',",
 					"        manifest: { capabilities: ['tools'] },",
-					"        contributions: { tools: [], commands: [], messageBuilders: [], providers: [], automationEventTypes: [] },",
+					"        contributions: { tools: [], commands: [], messageBuilders: [], providers: [] },",
 					"      }],",
 					"      failures: [],",
 					"      warnings: [],",
@@ -561,7 +522,7 @@ describe("plugin-sandbox", () => {
 				"utf8",
 			);
 
-			process.env.CLINE_WRAPPER_PATH = wrapperPath;
+			process.env.BEDROCK_CODER_WRAPPER_PATH = wrapperPath;
 			vi.resetModules();
 			const { loadSandboxedPlugins: loadSandboxedPluginsFromWrapper } =
 				await import("./plugin-sandbox");
@@ -583,42 +544,13 @@ describe("plugin-sandbox", () => {
 			}
 		} finally {
 			if (previousWrapperPath === undefined) {
-				delete process.env.CLINE_WRAPPER_PATH;
+				delete process.env.BEDROCK_CODER_WRAPPER_PATH;
 			} else {
-				process.env.CLINE_WRAPPER_PATH = previousWrapperPath;
+				process.env.BEDROCK_CODER_WRAPPER_PATH = previousWrapperPath;
 			}
 			vi.resetModules();
 			await rm(wrapperRoot, { recursive: true, force: true });
 		}
-	});
-
-	it("registers automation event types and forwards sandbox automation events", async () => {
-		const extension = sharedExtensions.get("sandbox-automation-events");
-		const { tools, automationEventTypes, api } = createApiCapture();
-		await extension?.setup?.(api, {});
-		expect(automationEventTypes).toEqual([
-			expect.objectContaining({
-				eventType: "local.plugin_event",
-				source: "local-plugin",
-			}),
-		]);
-
-		const tool = tools.find((entry) => entry.name === "emit_automation_event");
-		await tool?.execute({ topic: "cron-feature-2" }, {
-			agentId: "agent-1",
-			conversationId: "conv-1",
-			iteration: 1,
-		} as AgentToolContext);
-		expect(forwardedEvents).toEqual([
-			{
-				name: "automation_event",
-				payload: expect.objectContaining({
-					eventId: "plugin-cron-feature-2",
-					eventType: "local.plugin_event",
-					source: "local-plugin",
-				}),
-			},
-		]);
 	});
 
 	it("runs run_end hooks in sandbox process", async () => {
@@ -780,8 +712,8 @@ describe("plugin-sandbox", () => {
 	it("loads sandbox plugins matching manifest providerIds and modelIds", async () => {
 		const matched = await loadSandboxedPlugins({
 			pluginPaths: [join(dir, "plugin-targeted.mjs")],
-			providerId: "openai",
-			modelId: "gpt-5.4",
+			providerId: "bedrock",
+			modelId: "anthropic.claude-sonnet-4-6",
 			importTimeoutMs: 30_000,
 		});
 
@@ -797,8 +729,8 @@ describe("plugin-sandbox", () => {
 	it("filters sandbox plugins with non-matching manifest providerIds and modelIds", async () => {
 		const filtered = await loadSandboxedPlugins({
 			pluginPaths: [join(dir, "plugin-targeted.mjs")],
-			providerId: "anthropic",
-			modelId: "claude-sonnet-4.5",
+			providerId: "bedrock",
+			modelId: "anthropic.claude-haiku-4-5-20251001-v1:0",
 			importTimeoutMs: 30_000,
 		});
 

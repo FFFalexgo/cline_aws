@@ -1,28 +1,13 @@
 /**
- * @cline/core
+ * @bedrock-coder/core
  *
  * Core contracts, shared state utilities, and Node runtime services.
  */
 
-export * as Llms from "@cline/llms";
-export {
-	ClineNotSubscribedError,
-	ClineOrgIndividualInferenceSubscriptionError,
-	ClinePassLimitError,
-	extractClinePassLimitMessage,
-	getClineNotSubscribedMessage,
-	getClineOrgIndividualInferenceSubscriptionMessage,
-	getClinePassSubscriptionUrl,
-	isClineNotSubscribedError,
-	isClineNotSubscribedMessage,
-	isClineOrgIndividualInferenceSubscriptionError,
-	isClineOrgIndividualInferenceSubscriptionMessage,
-	isClinePassLimitError,
-	isClinePassLimitMessage,
-} from "@cline/llms";
+export { Agent, createAgentRuntime } from "@bedrock-coder/agents";
+export * as Llms from "@bedrock-coder/llms";
 // Shared contracts and path helpers re-exported for app consumers.
 export type {
-	AddProviderActionRequest,
 	AgentConfig,
 	AgentEvent,
 	AgentExtension as AgentPlugin, // Public-facing alias for extensions
@@ -36,51 +21,24 @@ export type {
 	AgentRunStatus,
 	AgentTool,
 	AgentToolContext,
-	AutomationEventEnvelope,
 	BasicLogger,
 	BasicLogger as Logger,
-	CaptureSdkErrorInput,
 	ChatRunTurnRequest,
 	ChatRuntimeConfig,
 	ChatStartSessionArtifacts,
 	ChatStartSessionRequest,
 	ChatTurnResult,
-	ClineAccountActionRequest,
-	ConnectorHookEvent,
 	ContentBlock,
-	FeatureFlag,
-	FeatureFlagPayload,
-	FeatureFlagsAndPayloads,
-	FeatureFlagsContext,
-	FeatureFlagsSettings,
 	FileContent,
-	GetProviderModelsActionRequest,
 	HookSessionContext,
-	IFeatureFlagsProvider,
 	ImageContent,
-	ITelemetryService,
-	ListProvidersActionRequest,
 	Message,
 	MessageWithMetadata,
-	ProviderActionRequest,
-	ProviderCatalogResponse,
-	ProviderListItem,
-	ProviderModel,
-	ProviderOAuthLoginResponse,
 	RuntimeLoggerConfig,
-	SaveProviderSettingsActionRequest,
-	SdkTelemetryErrorComponent,
-	SdkTelemetryErrorSeverity,
 	SessionLineage,
 	TEAM_LIFECYCLE_EVENT_TYPE,
 	TEAM_PROGRESS_EVENT_TYPE,
 	TeamProgressProjectionEvent,
-	TelemetryArray,
-	TelemetryMetadata,
-	TelemetryObject,
-	TelemetryPrimitive,
-	TelemetryProperties,
-	TelemetryValue,
 	TextContent,
 	ThinkingContent,
 	ToolApprovalRequest,
@@ -92,125 +50,27 @@ export type {
 	WorkspaceInfoSchema,
 	WorkspaceManifest,
 	WorkspaceManifestSchema,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 export {
-	buildClineSystemPrompt as getClineDefaultSystemPrompt,
-	buildSdkErrorProperties,
+	buildBedrockCoderSystemPrompt as getBedrockCoderDefaultSystemPrompt,
 	ContributionRegistry,
-	captureSdkError,
-	createClineTelemetryServiceConfig,
-	createClineTelemetryServiceMetadata,
 	createContributionRegistry,
 	createTool,
 	emptyWorkspaceManifest,
-	FEATURE_FLAGS,
-	FeatureFlagDefaultValue,
 	formatDisplayUserInput,
 	noopBasicLogger,
-	normalizeSdkError,
 	normalizeUserInput,
 	parseUserCommandEnvelope,
 	registerDisposable,
-	SDK_ERROR_TELEMETRY_EVENT,
 	stripUtf8Bom,
-} from "@cline/shared";
-export * from "@cline/shared/storage";
-export {
-	type ClineAccountBalance,
-	type ClineAccountOperations,
-	type ClineAccountOrganization,
-	type ClineAccountOrganizationBalance,
-	type ClineAccountOrganizationUsageTransaction,
-	type ClineAccountPaymentTransaction,
-	ClineAccountService,
-	type ClineAccountServiceOptions,
-	type ClineAccountUsageTransaction,
-	type ClineAccountUser,
-	type ClineOrganization,
-	type ClineSubscriptionPlan,
-	executeClineAccountAction,
-	type FeaturebaseTokenResponse,
-	isClineAccountActionRequest,
-	type ProviderActionExecutor,
-	RpcClineAccountService,
-	type UserCurrentPlan,
-	type UserRemoteConfigOrganization,
-	type UserRemoteConfigResponse,
-} from "./account";
-export {
-	createOAuthClientCallbacks,
-	type OAuthClientCallbacksOptions,
-} from "./auth/client";
-export {
-	completeClineDeviceAuth,
-	getValidClineCredentials,
-	loginClineOAuth,
-	refreshClineToken,
-	startClineDeviceAuth,
-} from "./auth/cline";
-export {
-	getValidOpenAICodexCredentials,
-	loginOpenAICodex,
-	refreshOpenAICodexToken,
-} from "./auth/codex";
-export {
-	getValidOcaCredentials,
-	loginOcaOAuth,
-	refreshOcaToken,
-} from "./auth/oca";
-export {
-	formatProviderOAuthApiKey,
-	getPersistedProviderApiKey,
-	getProviderAuthHandler,
-	getProviderAuthStorageId,
-	getProviderOAuthCredentialsFromSettings,
-	isOAuthProvider,
-	loginAndSaveProviderOAuthCredentials,
-	type ProviderAuthHandler,
-	type ProviderAuthLoginInput,
-	type ProviderAuthRefreshInput,
-	type ProviderAuthSaveCredentialsInput,
-	type ProviderOAuthCredentials,
-	resolveProviderApiKeyFromSettings,
-	saveProviderOAuthCredentials,
-} from "./auth/provider-auth-registry";
+} from "@bedrock-coder/shared";
+export * from "@bedrock-coder/shared/storage";
+export { BedrockCoderCore } from "./BedrockCoderCore";
 export type {
-	LocalOAuthServer,
-	LocalOAuthServerOptions,
-	OAuthCallbackPayload,
-	OAuthServerCloseInfo,
-	OAuthServerListeningInfo,
-} from "./auth/server";
-export { startLocalOAuthServer } from "./auth/server";
-export type {
-	OAuthCredentials,
-	OAuthLoginCallbacks,
-	OAuthPrompt,
-	OAuthProviderInterface,
-	OcaClientMetadata,
-	OcaMode,
-	OcaOAuthConfig,
-	OcaOAuthEnvironmentConfig,
-	OcaOAuthProviderOptions,
-	OcaTokenResolution,
-} from "./auth/types";
-export { ClineCore } from "./ClineCore";
-export type {
-	ClineAutomationEventIngressResult,
-	ClineAutomationEventLog,
-	ClineAutomationEventSuppression,
-	ClineAutomationListEventsOptions,
-	ClineAutomationListRunsOptions,
-	ClineAutomationListSpecsOptions,
-	ClineAutomationRun,
-	ClineAutomationRunStatus,
-	ClineAutomationSpec,
-	ClineCoreAutomationApi,
-	ClineCoreAutomationOptions,
-	ClineCoreListHistoryOptions,
-	ClineCoreOptions,
-	ClineCoreSettingsApi,
-	ClineCoreStartInput,
+	BedrockCoderCoreListHistoryOptions,
+	BedrockCoderCoreOptions,
+	BedrockCoderCoreSettingsApi,
+	BedrockCoderCoreStartInput,
 	CompareCheckpointInput,
 	CompareCheckpointResult,
 	HubOptions,
@@ -218,7 +78,7 @@ export type {
 	RestoreInput,
 	RestoreOptions,
 	RestoreResult,
-} from "./cline-core/types";
+} from "./bedrock-coder-core/types";
 export type {
 	LoadAgentPluginFromPathOptions,
 	PluginInitializationFailure,
@@ -275,9 +135,28 @@ export {
 	WORKFLOWS_CONFIG_DIRECTORY_NAME,
 } from "./extensions/config";
 export {
-	type AuthorizeMcpServerOAuthOptions,
-	type AuthorizeMcpServerOAuthResult,
-	authorizeMcpServerOAuth,
+	createCompactionStateAwarePrepareTurn,
+	createContextCompactionPrepareTurn,
+} from "./extensions/context/compaction";
+export {
+	assertEgressDataClassAllowed,
+	buildPublicSearchUrl,
+	CorporateEgressPolicyError,
+	corporateResearchRequest,
+	EGRESS_DATA_CLASSES,
+	EGRESS_SINKS,
+	isPublicNetworkAddress,
+	sanitizePublicSearchQuery,
+	validatePublicResearchUrl,
+	type CorporateResearchRequestOptions,
+	type CorporateResearchResponse,
+	type EgressAuditEvent,
+	type EgressDataClass,
+	type EgressSink,
+	type ResearchDnsAddress,
+	type ResearchHttpMethod,
+} from "./security/corporate-egress-policy";
+export {
 	type CreateDisabledMcpToolPoliciesOptions,
 	type CreateDisabledMcpToolPolicyOptions,
 	type CreateMcpToolsOptions,
@@ -328,8 +207,51 @@ export {
 	updateMcpSettingsFileSync,
 } from "./extensions/mcp";
 export {
-	type AgentTask,
-	AgentTeam,
+	ALL_DEFAULT_TOOL_NAMES,
+	type ApplyPatchExecutor,
+	type ApplyPatchInput,
+	type AskQuestionExecutor,
+	type BuiltinToolAvailabilityContext,
+	CommandExitError,
+	type CreateBuiltinToolsOptions,
+	type CreateDefaultToolsOptions,
+	computePatchChanges,
+	createApplyPatchExecutor,
+	createBuiltinTools,
+	createDefaultExecutors,
+	createDefaultShellExecutor,
+	createDefaultTools,
+	createDefaultToolsWithPreset,
+	createEditorExecutor,
+	createShellExecutor,
+	createShellTool,
+	type DefaultExecutorsOptions,
+	type DefaultToolName,
+	DefaultToolNames,
+	type DefaultToolsConfig,
+	type EditFileInput,
+	type EditorExecutor,
+	type EditorExecutorOptions,
+	getCoreAcpToolNames,
+	getCoreBuiltinToolCatalog,
+	getCoreDefaultEnabledToolIds,
+	getCoreHeadlessToolNames,
+	MAX_COMMAND_OUTPUT_CHARS,
+	PatchActionType,
+	type PatchFileChange,
+	resolveCoreSelectedToolIds,
+	type ShellExecutor,
+	type ShellExecutorOptions,
+	type StructuredCommandInput,
+	StructuredCommandInputSchema,
+	TEAM_TOOL_NAMES,
+	type ToolCatalogEntry,
+	type ToolExecutors,
+	type ToolPresetName,
+	ToolPresets,
+	truncateCommandOutput,
+} from "./extensions/tools";
+export {
 	AgentTeamsRuntime,
 	type AgentTeamsRuntimeOptions,
 	type BootstrapAgentTeamsOptions,
@@ -361,7 +283,6 @@ export {
 	type SpawnTeammateOptions,
 	type SubAgentEndContext,
 	type SubAgentStartContext,
-	type TaskResult,
 	type TeamEvent,
 	type TeamMemberConfig,
 	type TeamTeammateRuntimeConfig,
@@ -407,16 +328,6 @@ export {
 	sdkDebug,
 	setSdkLogger,
 } from "./logging/early-logger";
-export {
-	buildRemoteConfigSessionBlobUploadMetadata,
-	createRemoteConfigSessionMessagesArtifactUploader,
-	type PreparedRemoteConfigCoreIntegration,
-	type PrepareRemoteConfigCoreIntegrationOptions,
-	prepareRemoteConfigCoreIntegration,
-	REMOTE_CONFIG_SESSION_BLOB_UPLOAD_METADATA_KEY,
-	readRemoteConfigSessionBlobUploadMetadata,
-	registerRemoteConfigSessionBlobUpload,
-} from "./remote-config/integration";
 export type { RuntimeCapabilities } from "./runtime/capabilities";
 export { normalizeRuntimeCapabilities } from "./runtime/capabilities";
 export type {
@@ -462,11 +373,6 @@ export {
 	createTeamName,
 	DefaultRuntimeBuilder,
 } from "./runtime/orchestration/runtime-builder";
-export {
-	OAuthReauthRequiredError,
-	type RuntimeOAuthResolution,
-	RuntimeOAuthTokenManager,
-} from "./runtime/orchestration/runtime-oauth-token-manager";
 export type {
 	BuiltRuntime,
 	RuntimeBuilder,
@@ -487,11 +393,6 @@ export {
 	type DesktopToolApprovalOptions,
 	requestDesktopToolApproval,
 } from "./runtime/tools/tool-approval";
-export {
-	FeatureFlagsService,
-	type FeatureFlagsServiceOptions,
-	NoOpFeatureFlagsProvider,
-} from "./services/feature-flags";
 export type {
 	GlobalCompactionStrategy,
 	GlobalSettings,
@@ -503,7 +404,6 @@ export {
 	GlobalSettingsSchema,
 	isAutoUpdateEnabledGlobally,
 	isPluginDisabledGlobally,
-	isTelemetryOptedOutGlobally,
 	isToolDisabledGlobally,
 	readCompactionStrategyGlobally,
 	readGlobalSettings,
@@ -513,30 +413,39 @@ export {
 	setCompactionStrategyGlobally,
 	setDisabledPlugin,
 	setDisabledTools,
-	setTelemetryOptOutGlobally,
 	toggleDisabledTool,
 	writeGlobalSettings,
 } from "./services/global-settings";
 export type {
-	MarketplaceActionResult,
-	MarketplaceEntryInput,
-	MarketplacePrimitiveType,
-	MarketplaceSpawnCommand,
-	MarketplaceSpawnResult,
-	UninstallMarketplaceEntryOptions,
-} from "./services/marketplace";
+	BedrockConnectionSettings,
+	BuiltInProviderId,
+	ProviderCapability,
+	ProviderClient,
+	ProviderConfig,
+	ProviderDefaultsConfig,
+	ProviderId,
+	ProviderProtocol,
+	ProviderSettings,
+	ReasoningSettings,
+	ToProviderConfigOptions,
+} from "./services/llms/provider-settings";
 export {
-	findInstalledGlobalMarketplaceSkillName,
-	getGlobalMarketplaceSkillPaths,
-	getMarketplaceSkillCandidates,
-	isMarketplaceSkillInstalled,
-	marketplaceEntryKey,
-	resolveMarketplaceMcpServerName,
-	uninstallMarketplaceEntry,
-	uninstallMarketplaceMcpServerFromSettings,
-	uninstallMarketplacePlugin,
-	uninstallMarketplaceSkill,
-} from "./services/marketplace";
+	BedrockConnectionSchema,
+	BUILT_IN_PROVIDER,
+	BUILT_IN_PROVIDER_IDS,
+	createProviderConfig,
+	isBuiltInProviderId,
+	normalizeProviderId,
+	ProviderClientSchema,
+	ProviderIdSchema,
+	ProviderProtocolSchema,
+	ProviderSettingsSchema,
+	parseSettings,
+	ReasoningSettingsSchema,
+	safeCreateProviderConfig,
+	safeParseSettings,
+	toProviderConfig,
+} from "./services/llms/provider-settings";
 export type {
 	McpInstallOptions,
 	McpInstallResult,
@@ -544,7 +453,6 @@ export type {
 export {
 	buildMcpInstallTransport,
 	installMcpServer,
-	parseMcpInstallArgs,
 } from "./services/mcp-install";
 export type {
 	ParsedPluginSource,
@@ -556,7 +464,6 @@ export type {
 export {
 	collectPluginMcpOAuthCandidates,
 	installPlugin,
-	isOfficialPluginSlug,
 	parsePluginSource,
 } from "./services/plugin-install";
 export type {
@@ -583,111 +490,12 @@ export type {
 	PluginUninstallResult,
 } from "./services/plugin-uninstall";
 export { uninstallPlugin } from "./services/plugin-uninstall";
-export {
-	ensureCustomProvidersLoadedSync,
-	readModelsFileSync,
-	resolveModelsRegistryPath,
-	type StoredModelEntry,
-	type StoredProviderEntry,
-	syncStoredProviderRegistration,
-	writeModelsFileSync,
-} from "./services/providers/local-provider-registry";
-export {
-	addLocalProvider,
-	type DeleteLocalProviderRequest,
-	deleteLocalProvider,
-	ensureCustomProvidersLoaded,
-	getLocalProviderModels,
-	listLocalProviders,
-	loginAndSaveLocalProviderOAuthCredentials,
-	loginLocalProvider,
-	markLocalProviderEnabled,
-	normalizeOAuthProvider,
-	refreshProviderModelsFromSource,
-	resolveLocalClineAuthToken,
-	saveLocalProviderOAuthCredentials,
-	saveLocalProviderSettings,
-	type UpdateLocalProviderRequest,
-	updateLocalProvider,
-} from "./services/providers/local-provider-service";
-export {
-	getProviderConfigFields,
-	type ProviderConfigFieldKey,
-	type ProviderConfigFieldRequirement,
-	type ProviderConfigFields,
-} from "./services/providers/provider-config-fields";
-export {
-	type MigrateLegacyProviderSettingsOptions,
-	type MigrateLegacyProviderSettingsResult,
-	migrateLegacyProviderSettings,
-} from "./services/storage/provider-settings-legacy-migration";
-export { ProviderSettingsManager } from "./services/storage/provider-settings-manager";
+export { BedrockSettingsStore } from "./services/storage/bedrock-settings-store";
 export { SqliteSessionStore } from "./services/storage/sqlite-session-store";
 export {
 	SqliteTeamStore,
 	type SqliteTeamStoreOptions,
 } from "./services/storage/team-store";
-export { resolveCoreDistinctId } from "./services/telemetry";
-export type {
-	CaptureAgentUnexpectedReasoningTokensInput,
-	CaptureCompactionExecutedProperties,
-	CaptureCompactionSkippedProperties,
-	TelemetryAgentIdentityProperties,
-	TelemetryAgentKind,
-	TelemetryCompactionMode,
-	TelemetryCompactionStrategy,
-	WorkspaceInitErrorProperties,
-	WorkspaceInitializedProperties,
-	WorkspacePathResolvedProperties,
-} from "./services/telemetry/core-events";
-export {
-	CORE_TELEMETRY_EVENTS,
-	captureAgentCreated,
-	captureAgentTeamCreated,
-	captureAgentUnexpectedReasoningTokens,
-	captureAuthFailed,
-	captureAuthLoggedOut,
-	captureAuthStarted,
-	captureAuthSucceeded,
-	captureCompactionExecuted,
-	captureCompactionSkipped,
-	captureConversationTurnEvent,
-	captureDiffEditFailure,
-	captureExtensionActivated,
-	captureHookDiscovery,
-	captureMentionFailed,
-	captureMentionSearchResults,
-	captureMentionUsed,
-	captureMistakeLimitReached,
-	captureModeSwitch,
-	captureProviderApiError,
-	captureProviderConfigured,
-	captureSkillUsed,
-	captureSubagentExecution,
-	captureTaskCompleted,
-	captureTaskCreated,
-	captureTaskRestarted,
-	captureTokenUsage,
-	captureToolUsage,
-	captureWorkspaceInitError,
-	captureWorkspaceInitialized,
-	captureWorkspacePathResolved,
-	identifyAccount,
-} from "./services/telemetry/core-events";
-export type { ITelemetryAdapter } from "./services/telemetry/ITelemetryAdapter";
-export {
-	type ConfiguredTelemetryHandle,
-	type CreateOpenTelemetryTelemetryServiceOptions,
-	createConfiguredTelemetryHandle,
-	createConfiguredTelemetryService,
-	createOpenTelemetryTelemetryService,
-	OpenTelemetryProvider,
-	type OpenTelemetryProviderOptions,
-} from "./services/telemetry/OpenTelemetryProvider";
-export {
-	TelemetryLoggerSink,
-	type TelemetryLoggerSinkOptions,
-} from "./services/telemetry/TelemetryLoggerSink";
 export {
 	accumulateUsageTotals,
 	createInitialAccumulatedUsage,
@@ -727,6 +535,12 @@ export {
 	findCheckpointForRun,
 	readSessionCheckpointHistory,
 } from "./session/checkpoint-restore";
+export {
+	createSessionCompactionState,
+	parseSessionCompactionState,
+	projectSessionCompactionState,
+	type SessionCompactionState,
+} from "./session/models/session-compaction";
 export {
 	deriveSubsessionStatus,
 	makeSubSessionId,
@@ -772,6 +586,8 @@ export {
 	CoreSettingsService,
 	createCoreSettingsService,
 } from "./settings";
+// Compatibility barrel (legacy imports).
+export type { RuntimeEnvironment } from "./types";
 export type {
 	ChatMessage,
 	ChatMessageImage,
@@ -789,158 +605,10 @@ export {
 	ChatSummarySchema,
 	ChatViewStateSchema,
 } from "./types/chat-schema";
-export type { SessionMessagesArtifactUploader } from "./types/session";
-export { CORE_BUILD_VERSION } from "./version";
-export async function loadOpenTelemetryAdapter() {
-	return import("./services/telemetry/index.js");
-}
-export { Agent, createAgentRuntime } from "@cline/agents";
-export {
-	createCompactionStateAwarePrepareTurn,
-	createContextCompactionPrepareTurn,
-} from "./extensions/context/compaction";
-export {
-	ALL_DEFAULT_TOOL_NAMES,
-	type ApplyPatchExecutor,
-	type ApplyPatchInput,
-	type AskQuestionExecutor,
-	type BuiltinToolAvailabilityContext,
-	CommandExitError,
-	type CreateBuiltinToolsOptions,
-	type CreateDefaultToolsOptions,
-	computePatchChanges,
-	createApplyPatchExecutor,
-	createBuiltinTools,
-	createDefaultExecutors,
-	createDefaultShellExecutor,
-	createDefaultTools,
-	createDefaultToolsWithPreset,
-	createEditorExecutor,
-	createShellExecutor,
-	createShellTool,
-	createToolPoliciesWithPreset,
-	type DefaultExecutorsOptions,
-	type DefaultToolName,
-	DefaultToolNames,
-	type DefaultToolsConfig,
-	type EditFileInput,
-	type EditorExecutor,
-	type EditorExecutorOptions,
-	getCoreAcpToolNames,
-	getCoreBuiltinToolCatalog,
-	getCoreDefaultEnabledToolIds,
-	getCoreHeadlessToolNames,
-	MAX_COMMAND_OUTPUT_CHARS,
-	PatchActionType,
-	type PatchFileChange,
-	resolveCoreSelectedToolIds,
-	type ShellExecutor,
-	type ShellExecutorOptions,
-	type StructuredCommandInput,
-	StructuredCommandInputSchema,
-	TEAM_TOOL_NAMES,
-	type ToolCatalogEntry,
-	type ToolExecutors,
-	type ToolPolicyPresetName,
-	type ToolPresetName,
-	ToolPresets,
-	truncateCommandOutput,
-} from "./extensions/tools";
-export {
-	type ClineRecommendedModel,
-	type ClineRecommendedModelsData,
-	FALLBACK_CLINE_RECOMMENDED_MODELS,
-	type FetchClineRecommendedModelsOptions,
-	fetchClineRecommendedModels,
-} from "./services/llms/cline-recommended-models";
-export {
-	clearLiveModelsCatalogCache,
-	clearPrivateModelsCatalogCache,
-	DEFAULT_MODELS_CATALOG_URL,
-	getLiveModelsCatalog,
-	getProviderConfig,
-	OPENAI_COMPATIBLE_PROVIDERS,
-	resolveProviderConfig,
-} from "./services/llms/provider-defaults";
-export type {
-	AuthSettings,
-	AwsSettings,
-	AzureSettings,
-	BuiltInProviderId,
-	GcpSettings,
-	ModelCatalogConfig,
-	ModelCatalogSettings,
-	OcaSettings,
-	ProviderCapability,
-	ProviderClient,
-	ProviderConfig,
-	ProviderDefaultsConfig,
-	ProviderId,
-	ProviderProtocol,
-	ProviderSettings,
-	ReasoningSettings,
-	SapSettings,
-	ToProviderConfigOptions,
-} from "./services/llms/provider-settings";
-export {
-	AuthSettingsSchema,
-	AwsSettingsSchema,
-	AzureSettingsSchema,
-	BUILT_IN_PROVIDER,
-	BUILT_IN_PROVIDER_IDS,
-	createProviderConfig,
-	GcpSettingsSchema,
-	isBuiltInProviderId,
-	ModelCatalogSettingsSchema,
-	normalizeProviderId,
-	OcaSettingsSchema,
-	ProviderClientSchema,
-	ProviderIdSchema,
-	ProviderProtocolSchema,
-	ProviderSettingsSchema,
-	parseSettings,
-	ReasoningSettingsSchema,
-	SapSettingsSchema,
-	safeCreateProviderConfig,
-	safeParseSettings,
-	toProviderConfig,
-} from "./services/llms/provider-settings";
-export {
-	defineLlmsConfig,
-	loadLlmsConfigFromFile,
-} from "./services/llms/runtime-config";
-export {
-	createLlmsSdk,
-	DefaultLlmsSdk,
-} from "./services/llms/runtime-registry";
-export type {
-	BuiltInProviderSummary,
-	CreateHandlerInput,
-	LlmsConfig,
-	LlmsSdk,
-	ProviderConfigDefaults,
-	ProviderSelectionConfig,
-	RegisterBuiltinProviderInput,
-	RegisteredProviderSummary,
-	RegisterModelInput,
-	RegisterProviderInput,
-} from "./services/llms/runtime-types";
-export {
-	TelemetryService,
-	type TelemetryServiceOptions,
-} from "./services/telemetry/TelemetryService";
-export {
-	createSessionCompactionState,
-	parseSessionCompactionState,
-	projectSessionCompactionState,
-	type SessionCompactionState,
-} from "./session/models/session-compaction";
-// Compatibility barrel (legacy imports).
-export type { RuntimeEnvironment } from "./types";
 export type { SessionStatus } from "./types/common";
 export { SESSION_STATUSES, SessionSource } from "./types/common";
 export type {
-	ClineCoreStartConfig,
+	BedrockCoderCoreStartConfig,
 	CoreAgentMode,
 	CoreCheckpointConfig,
 	CoreCheckpointContext,
@@ -973,6 +641,7 @@ export {
 	StoredProviderSettingsEntrySchema,
 	StoredProviderSettingsSchema,
 } from "./types/provider-settings";
+export type { SessionMessagesArtifactUploader } from "./types/session";
 export type {
 	SessionHistoryMetadata,
 	SessionHistoryRecord,
@@ -980,3 +649,4 @@ export type {
 	SessionRef,
 } from "./types/sessions";
 export type { ArtifactStore, SessionStore, TeamStore } from "./types/storage";
+export { CORE_BUILD_VERSION } from "./version";

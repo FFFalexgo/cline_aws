@@ -1,4 +1,4 @@
-import type { AgentToolContext, HubEventEnvelope } from "@cline/shared";
+import type { AgentToolContext, HubEventEnvelope } from "@bedrock-coder/shared";
 import { describe, expect, it, vi } from "vitest";
 import {
 	SessionNotFoundError,
@@ -6,7 +6,6 @@ import {
 	type StartSessionResult,
 } from "../../runtime/host/runtime-host";
 import { createSessionCompactionState } from "../../session/models/session-compaction";
-import { createLocalHubScheduleRuntimeHandlers } from "../daemon/runtime-handlers";
 import { HubServerTransport } from "../server";
 import {
 	handleApprovalRespond,
@@ -23,8 +22,6 @@ describe("HubServerTransport boundaries", () => {
 	function createTransport(options: Record<string, unknown> = {}) {
 		const { sessionHost: sessionHostOverride, ...transportOptions } = options;
 		return new HubServerTransport({
-			runtimeHandlers: createLocalHubScheduleRuntimeHandlers(),
-			scheduleOptions: { dbPath: ":memory:" },
 			sessionHost: {
 				subscribe: vi.fn(),
 				startSession: vi.fn(),
@@ -107,7 +104,7 @@ describe("HubServerTransport boundaries", () => {
 			async (input: StartSessionInput): Promise<StartSessionResult> => {
 				capturedStartInput = input;
 				const sessionId = input.config.sessionId?.trim() || "missing-session";
-				resolvedWorkspace = "/home/host/.cline/data/workspaces/chat";
+				resolvedWorkspace = "/home/host/.bedrock-coder/data/workspaces/chat";
 				return {
 					sessionId,
 					manifest: {
@@ -118,7 +115,7 @@ describe("HubServerTransport boundaries", () => {
 						started_at: new Date(0).toISOString(),
 						status: "running",
 						interactive: true,
-						provider: "cline",
+						provider: "bedrockCoder",
 						model: "test-model",
 						cwd: resolvedWorkspace,
 						workspace_root: resolvedWorkspace,
@@ -142,7 +139,7 @@ describe("HubServerTransport boundaries", () => {
 					startedAt: new Date(0).toISOString(),
 					updatedAt: new Date(0).toISOString(),
 					interactive: true,
-					provider: "cline",
+					provider: "bedrockCoder",
 					model: "test-model",
 					cwd: resolvedWorkspace,
 					workspaceRoot: resolvedWorkspace,
@@ -162,7 +159,7 @@ describe("HubServerTransport boundaries", () => {
 			payload: {
 				sessionConfig: {
 					sessionId: "session-boundary",
-					providerId: "cline",
+					providerId: "bedrock",
 					modelId: "test-model",
 					systemPrompt: "system",
 				},
@@ -202,7 +199,7 @@ describe("HubServerTransport boundaries", () => {
 			toolCallId: "call-1",
 			toolName: "run_commands",
 			input: { commands: ["echo hi"] },
-			policy: { autoApprove: false },
+			policy: {},
 		});
 
 		expect(result).toEqual({
@@ -235,7 +232,7 @@ describe("HubServerTransport boundaries", () => {
 					startedAt: new Date(0).toISOString(),
 					status: "completed",
 					interactive: false,
-					provider: "cline",
+					provider: "bedrockCoder",
 					model: "test-model",
 					cwd: "/tmp/project",
 					workspaceRoot: "/tmp/project",
@@ -302,7 +299,7 @@ describe("HubServerTransport boundaries", () => {
 					startedAt: new Date(0).toISOString(),
 					status: "completed",
 					interactive: false,
-					provider: "cline",
+					provider: "bedrockCoder",
 					model: "test-model",
 					cwd: "/tmp/project",
 					workspaceRoot: "/tmp/project",
@@ -344,9 +341,7 @@ describe("HubServerTransport boundaries", () => {
 
 	it("returns session_not_found when session messages are requested for an unknown session", async () => {
 		const readMessages = vi.fn().mockResolvedValue([]);
-		const telemetry = { capture: vi.fn() };
 		const transport = createTransport({
-			telemetry,
 			sessionHost: {
 				subscribe: vi.fn(),
 				startSession: vi.fn(),
@@ -381,20 +376,6 @@ describe("HubServerTransport boundaries", () => {
 				message: "Unknown session: missing-session",
 			},
 		});
-		expect(telemetry.capture).toHaveBeenCalledWith({
-			event: "sdk.error",
-			properties: expect.objectContaining({
-				component: "core",
-				operation: "hub.command_reply",
-				severity: "warn",
-				handled: true,
-				command: "session.messages",
-				requestId: "req-1",
-				sessionId: "missing-session",
-				errorCode: "session_not_found",
-				error_message: "Unknown session: missing-session",
-			}),
-		});
 	});
 
 	it("keeps session list and get lightweight unless snapshots are requested", async () => {
@@ -410,7 +391,7 @@ describe("HubServerTransport boundaries", () => {
 			workspaceRoot: "/tmp/project",
 			cwd: "/tmp/project",
 			interactive: true,
-			provider: "cline",
+			provider: "bedrockCoder",
 			model: "test-model",
 			enableTools: true,
 			enableSpawn: true,
@@ -494,7 +475,7 @@ describe("HubServerTransport boundaries", () => {
 				toolCallId: "call-1",
 				toolName: "run_commands",
 				input: { commands: ["echo hi"] },
-				policy: { autoApprove: false },
+				policy: {},
 			});
 			resultPromise.then((result) => {
 				settled = result;
@@ -575,7 +556,7 @@ describe("HubServerTransport boundaries", () => {
 			toolCallId: "call-1",
 			toolName: "run_commands",
 			input: { commands: ["echo hi"] },
-			policy: { autoApprove: false },
+			policy: {},
 		});
 		await Promise.resolve();
 
@@ -626,7 +607,7 @@ describe("HubServerTransport boundaries", () => {
 						started_at: new Date(0).toISOString(),
 						status: "running",
 						interactive: true,
-						provider: "cline",
+						provider: "bedrockCoder",
 						model: "test-model",
 						cwd: "/tmp/project",
 						workspace_root: "/tmp/project",
@@ -675,7 +656,7 @@ describe("HubServerTransport boundaries", () => {
 				workspaceRoot: "/tmp/project",
 				cwd: "/tmp/project",
 				sessionConfig: {
-					providerId: "cline",
+					providerId: "bedrock",
 					modelId: "test-model",
 					cwd: "/tmp/project",
 					workspaceRoot: "/tmp/project",
@@ -758,7 +739,7 @@ describe("HubServerTransport boundaries", () => {
 					started_at: new Date(0).toISOString(),
 					status: "running",
 					interactive: true,
-					provider: "cline",
+					provider: "bedrockCoder",
 					model: "test-model",
 					cwd: "/tmp/project",
 					workspace_root: "/tmp/project",
@@ -807,7 +788,7 @@ describe("HubServerTransport boundaries", () => {
 				workspaceRoot: "/tmp/project",
 				cwd: "/tmp/project",
 				sessionConfig: {
-					providerId: "cline",
+					providerId: "bedrock",
 					modelId: "test-model",
 					cwd: "/tmp/project",
 					workspaceRoot: "/tmp/project",
@@ -1332,7 +1313,7 @@ describe("HubServerTransport boundaries", () => {
 					startedAt: new Date(0).toISOString(),
 					status: "running",
 					interactive: true,
-					provider: "cline",
+					provider: "bedrockCoder",
 					model: "test-model",
 					cwd: "/tmp/project",
 					workspaceRoot: "/tmp/project",

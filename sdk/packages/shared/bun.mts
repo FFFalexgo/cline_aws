@@ -7,9 +7,9 @@ const buildMode: BuildMode =
 	rawMode === "bundle" || rawMode === "dev" ? rawMode : "package";
 
 const shouldEmitTypes = buildMode === "package";
-const sourcemap = Bun.env.CLINE_SOURCEMAPS === "1" ? "linked" : "none";
+const sourcemap = Bun.env.BEDROCK_CODER_SOURCEMAPS === "1" ? "linked" : "none";
 // minify: true keeps identifier mangling active even when sourcemaps are enabled.
-const minify = Bun.env.CLINE_SOURCEMAPS !== "1";
+const minify = Bun.env.BEDROCK_CODER_SOURCEMAPS !== "1";
 
 const runBuild = async (
 	name: string,
@@ -35,10 +35,8 @@ const runBuild = async (
 await runBuild("node", {
 	entrypoints: [
 		"./src/index.ts",
-		"./src/automation/index.ts",
 		"./src/db/index.ts",
 		"./src/node.ts",
-		"./src/remote-config/index.ts",
 		"./src/storage/index.ts",
 	],
 	outdir: "./dist",

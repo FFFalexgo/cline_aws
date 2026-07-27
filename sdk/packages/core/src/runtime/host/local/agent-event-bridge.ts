@@ -1,17 +1,10 @@
-import type {
-	AgentEvent,
-	AutomationEventEnvelope,
-	BasicLogger,
-	BasicLogMetadata,
-} from "@cline/shared";
+import type { AgentEvent, BasicLogger, BasicLogMetadata } from "@bedrock-coder/shared";
 import type { TeamEvent } from "../../../extensions/tools/team";
 import {
 	type AgentEventContext,
-	buildTelemetryAgentIdentity,
 	extractAgentEventMetadata,
 	handleAgentEvent,
 } from "../../../services/agent-events";
-import { captureAgentCreated } from "../../../services/telemetry/core-events";
 import {
 	dispatchTeamEventToBackend,
 	emitTeamProgress,
@@ -99,26 +92,6 @@ export class AgentEventBridge {
 					isPrimaryAgentEvent: false,
 				});
 			}
-			if (event.type === "teammate_spawned") {
-				const agentIdentity = buildTelemetryAgentIdentity({
-					agentId: event.teammate.runtimeAgentId ?? event.agentId,
-					conversationId: event.teammate.conversationId,
-					parentAgentId: event.teammate.parentAgentId,
-					createdByAgentId: readAgentId(session.agent),
-					teamId: session.runtime.teamRuntime?.getTeamId(),
-					teamName: session.runtime.teamRuntime?.getTeamName(),
-					teamRole: "teammate",
-					teamAgentId: event.agentId,
-				});
-				if (agentIdentity) {
-					captureAgentCreated(session.config.telemetry, {
-						ulid: rootSessionId,
-						modelId: event.teammate.modelId ?? session.config.modelId,
-						provider: session.config.providerId,
-						...agentIdentity,
-					});
-				}
-			}
 		}
 
 		await dispatchTeamEventToBackend(
@@ -135,25 +108,9 @@ export class AgentEventBridge {
 	async handlePluginEvent(
 		rootSessionId: string,
 		event: { name: string; payload?: unknown },
-		fallbackAutomation?: NonNullable<
-			CoreSessionConfig["extensionContext"]
-		>["automation"],
 	): Promise<void> {
 		if (event.name === "plugin_log") {
 			this.handlePluginLog(rootSessionId, event.payload);
-			return;
-		}
-		if (event.name === "automation_event") {
-			const session = this.deps.getSession(rootSessionId);
-			const automation =
-				session?.config.extensionContext?.automation ?? fallbackAutomation;
-			if (!automation) return;
-			const payload =
-				event.payload && typeof event.payload === "object"
-					? (event.payload as AutomationEventEnvelope)
-					: undefined;
-			if (!payload) return;
-			await automation.ingestEvent(payload);
 			return;
 		}
 		if (

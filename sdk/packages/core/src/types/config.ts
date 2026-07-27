@@ -1,4 +1,4 @@
-import type { ModelInfo } from "@cline/llms";
+import type { ModelInfo } from "@bedrock-coder/llms";
 import type {
 	AgentConfig,
 	AgentHooks,
@@ -9,12 +9,11 @@ import type {
 	ConsecutiveMistakeLimitDecision,
 	ExtensionContext,
 	HookErrorMode,
-	ITelemetryService,
 	MessageWithMetadata,
 	SessionExecutionConfig,
 	SessionPromptConfig,
 	SessionWorkspaceConfig,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import type { ToolRoutingRule } from "../extensions/tools/model-tool-routing";
 import type { TeamEvent } from "../extensions/tools/team";
 import type { ProviderConfig } from "./provider-settings";
@@ -22,11 +21,8 @@ import type { ProviderConfig } from "./provider-settings";
 export type CoreAgentMode = AgentMode;
 
 export interface CoreModelConfig {
-	providerId: string;
+	providerId: "bedrock";
 	modelId: string;
-	apiKey?: string;
-	baseUrl?: string;
-	headers?: Record<string, string>;
 	providerConfig?: ProviderConfig;
 	knownModels?: Record<string, ModelInfo>;
 	/**
@@ -56,7 +52,6 @@ export interface CoreRuntimeFeatures {
 	enableSpawnAgent: boolean;
 	enableAgentTeams: boolean;
 	disableMcpSettingsTools?: boolean;
-	yolo?: boolean;
 }
 
 export type CoreCompactionMode = "auto" | "manual";
@@ -130,11 +125,8 @@ export interface CoreCompactionResult {
 }
 
 export interface CoreCompactionSummarizerConfig {
-	providerId: string;
+	providerId: "bedrock";
 	modelId: string;
-	apiKey?: string;
-	baseUrl?: string;
-	headers?: Record<string, string>;
 	/**
 	 * Optional pre-resolved model metadata for the summarizer. Supplying either
 	 * this or `knownModels` lets agentic compaction budget summary input against
@@ -261,7 +253,6 @@ export interface CoreSessionConfig
 	hooks?: AgentHooks;
 	hookErrorMode?: HookErrorMode;
 	logger?: BasicLogger;
-	telemetry?: ITelemetryService;
 	extensionContext?: ExtensionContext;
 	extraTools?: AgentTool[];
 	pluginPaths?: string[];
@@ -285,10 +276,10 @@ export interface CoreSessionConfig
 }
 
 /**
- * Public ClineCore start configuration. The execution host resolves `cwd`
+ * Public BedrockCoderCore start configuration. The execution host resolves `cwd`
  * before constructing a runtime, assigning the shared chat workspace when both
  * workspace paths are omitted.
  */
-export type ClineCoreStartConfig = Omit<CoreSessionConfig, "cwd"> & {
+export type BedrockCoderCoreStartConfig = Omit<CoreSessionConfig, "cwd"> & {
 	cwd?: string;
 };

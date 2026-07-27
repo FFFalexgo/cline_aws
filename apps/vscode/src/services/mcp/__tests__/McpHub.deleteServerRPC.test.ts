@@ -82,7 +82,7 @@ describe("McpHub.deleteServerRPC", () => {
 		sandbox = sinon.createSandbox()
 		tempDir = path.join(os.tmpdir(), `mcp-delete-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
 		await fs.mkdir(tempDir, { recursive: true })
-		settingsPath = path.join(tempDir, "cline_mcp_settings.json")
+		settingsPath = path.join(tempDir, "mcp_settings.json")
 		getMcpSettingsFilePathStub.reset()
 		getMcpSettingsFilePathStub.resolves(settingsPath)
 		// Default writeFile to the real implementation; individual tests can wrap
@@ -100,8 +100,6 @@ describe("McpHub.deleteServerRPC", () => {
 		hub = Object.create(McpHub.prototype) as McpHub
 		;(hub as any).getSettingsDirectoryPath = async () => tempDir
 		;(hub as any).connections = [makeConnection("alpha"), makeConnection("beta")]
-		// clearOAuthForConnection touches the OAuth manager; stub it out.
-		sandbox.stub(hub as any, "clearOAuthForConnection").resolves()
 		// updateServerConnectionsRPC normally opens real transports; reproduce only
 		// the relevant behavior: drop connections no longer present in the new set.
 		sandbox.stub(hub as any, "updateServerConnectionsRPC").callsFake((...args: unknown[]) => {
@@ -183,7 +181,7 @@ describe("McpHub.deleteServerRPC", () => {
 		// schema-validated content, so the watcher's "change" event for our own
 		// write is a no-op. Read the file back through the same validating reader
 		// the implementation uses so the expected fingerprint includes the schema
-		// defaults (autoApprove, timeout) the impl seeds.
+		// transport defaults the implementation seeds.
 		const validated = await (hub as any).readAndValidateMcpSettingsFile()
 		const expected = (hub as any).computeConnectionFingerprint(validated.mcpServers)
 		;(hub as any).lastConnectionFingerprint.should.equal(expected)

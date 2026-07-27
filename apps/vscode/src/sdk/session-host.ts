@@ -1,6 +1,6 @@
 import type {
-	ClineCoreListHistoryOptions,
-	ClineCoreStartInput,
+	BedrockCoderCoreListHistoryOptions,
+	BedrockCoderCoreStartInput,
 	CoreSessionEvent,
 	HookEventPayload,
 	PendingPromptMutationResult,
@@ -17,21 +17,28 @@ import type {
 	SessionRecord,
 	StartSessionInput,
 	StartSessionResult,
-} from "@cline/core"
-import type { AgentResult } from "@cline/shared"
+} from "@bedrock-coder/core"
+import type {
+	AgentResult,
+	CreateTeamTaskInput,
+	TeamBoardSnapshot,
+	TeamRunRecord,
+	TeamTask,
+	UpdateTeamTaskInput,
+} from "@bedrock-coder/shared"
 
 export interface SdkSessionHost {
 	readonly runtimeAddress: string | undefined
 	start(input: StartSessionInput): Promise<StartSessionResult>
-	start(input: ClineCoreStartInput): Promise<StartSessionResult>
+	start(input: BedrockCoderCoreStartInput): Promise<StartSessionResult>
 	send(input: SendSessionInput): Promise<AgentResult | undefined>
 	getAccumulatedUsage(sessionId: string): Promise<SessionAccumulatedUsage | undefined>
 	abort(sessionId: string, reason?: unknown): Promise<void>
 	stop(sessionId: string): Promise<void>
 	dispose(reason?: string): Promise<void>
 	get(sessionId: string): Promise<SessionRecord | undefined>
-	list(limit?: number, options?: Omit<ClineCoreListHistoryOptions, "limit">): Promise<SessionHistoryRecord[]>
-	listHistory(options?: ClineCoreListHistoryOptions): Promise<SessionHistoryRecord[]>
+	list(limit?: number, options?: Omit<BedrockCoderCoreListHistoryOptions, "limit">): Promise<SessionHistoryRecord[]>
+	listHistory(options?: BedrockCoderCoreListHistoryOptions): Promise<SessionHistoryRecord[]>
 	delete(sessionId: string): Promise<boolean>
 	readMessages(sessionId: string): Promise<SdkInitialMessages>
 	updateSessionCompactionState?(sessionId: string, state: SessionCompactionState): Promise<{ updated: boolean }>
@@ -50,6 +57,10 @@ export interface SdkSessionHost {
 	pendingPrompts(action: "delete", input: PendingPromptsDeleteInput): Promise<PendingPromptMutationResult>
 	subscribe(listener: (event: CoreSessionEvent) => void): () => void
 	updateSessionModel?(sessionId: string, modelId: string): Promise<void>
+	getTeamBoard?(sessionId: string): TeamBoardSnapshot | undefined
+	createTeamTask?(sessionId: string, input: Omit<CreateTeamTaskInput, "createdBy">): TeamTask
+	updateTeamTask?(sessionId: string, input: UpdateTeamTaskInput): TeamTask
+	cancelTeamRun?(sessionId: string, runId: string, reason?: string): TeamRunRecord
 }
 
 export type SdkInitialMessages = NonNullable<StartSessionInput["initialMessages"]>

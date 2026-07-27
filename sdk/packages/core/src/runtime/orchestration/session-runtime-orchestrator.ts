@@ -19,8 +19,8 @@
  * OAuth-retry and run replay feasible.
  */
 
-import type { AgentRuntime } from "@cline/agents";
-import { createAgentRuntime } from "@cline/agents";
+import type { AgentRuntime } from "@bedrock-coder/agents";
+import { createAgentRuntime } from "@bedrock-coder/agents";
 import {
 	type AgentConfig,
 	type AgentEvent,
@@ -38,8 +38,7 @@ import {
 	type BasicLogger,
 	type ContributionRegistry,
 	createContributionRegistry,
-	type ITelemetryService,
-	isLikelyAuthError,
+	getToolApprovalDecision,
 	type LegacyAgentUsage,
 	type LoopDetectionConfig,
 	type Message,
@@ -47,17 +46,12 @@ import {
 	type ModelInfo,
 	mergeModelOptions,
 	type ToolCallRecord,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import { filterDisabledTools } from "../../services/global-settings";
 import {
 	createAgentModelFromConfig,
 	resolveKnownModelsFromConfig,
 } from "../../services/llms/handler-factory";
-import {
-	captureAuthRunRetry,
-	captureMistakeLimitReached,
-} from "../../services/telemetry/core-events";
-import { CLINE_INTERNAL_TELEMETRY_METADATA_KEY } from "../../services/telemetry/tool-context";
 import {
 	getMessageBuilderOptionsFromEnv,
 	MessageBuilder,
@@ -141,8 +135,12 @@ function filterToolsByPolicies(
 function filterAvailableExtensionTools(
 	tools: AgentTool[],
 	toolPolicies: AgentConfig["toolPolicies"],
+	mode: AgentConfig["mode"],
 ): AgentTool[] {
-	return filterDisabledTools(filterToolsByPolicies(tools, toolPolicies));
+	return filterDisabledTools(filterToolsByPolicies(tools, toolPolicies)).filter(
+		(tool) =>
+			getToolApprovalDecision({ toolName: tool.name, mode }) !== "prohibited",
+	);
 }
 
 function mergeRuntimeHooks(
@@ -254,7 +252,6 @@ export type SessionEventListener = (event: AgentEvent) => void;
 /** Subset of host-side deps needed by the session orchestrator. */
 export interface SessionRuntimeOrchestratorDeps {
 	readonly logger?: BasicLogger;
-	readonly telemetry?: ITelemetryService;
 	/**
 	 * Test hook: override the `AgentRuntime` factory. Production
 	 * callers leave this undefined and get the real `createAgentRuntime`.
@@ -281,11 +278,6 @@ export class SessionRuntime {
 	private readonly agentId: string;
 	private readonly parentAgentId?: string;
 	private readonly logger?: BasicLogger;
-	// §3.4.4 telemetry parity. Currently consumed by the MistakeTracker's
-	// `onLimitTelemetry` hook (task.mistake_limit_reached); most other
-	// runtime telemetry is emitted host-side from the agent event stream
-	// (services/agent-events.ts).
-	readonly telemetry?: ITelemetryService;
 	private readonly conversation: ConversationStore;
 	private readonly mistakeTracker: MistakeTracker;
 	private readonly loopTracker: LoopDetectionTracker;
@@ -371,7 +363,6 @@ export class SessionRuntime {
 			.slice(2, 8)}`;
 		this.parentAgentId = config.parentAgentId;
 		this.logger = deps.logger ?? config.logger;
-		this.telemetry = deps.telemetry ?? config.telemetry;
 		this.createAgentRuntimeImpl =
 			deps.createAgentRuntimeImpl ?? createAgentRuntime;
 
@@ -386,11 +377,8 @@ export class SessionRuntime {
 			setupContext: {
 				session: config.extensionContext?.session,
 				client: config.extensionContext?.client,
-				user: config.extensionContext?.user,
 				workspaceInfo: config.extensionContext?.workspace,
-				automation: config.extensionContext?.automation,
 				logger: config.extensionContext?.logger ?? this.logger,
-				telemetry: config.extensionContext?.telemetry ?? this.telemetry,
 			},
 		});
 		// Resolve + validate eagerly so `getExtensionRegistry()` is
@@ -406,29 +394,13 @@ export class SessionRuntime {
 		this.mistakeTracker = new MistakeTracker({
 			maxConsecutiveMistakes: maxMistakes,
 			onLimitReached: config.onConsecutiveMistakeLimitReached,
-			onLimitTelemetry: (context) => {
-				// Read connection fields from `this.config` at fire time so a
-				// mid-session `updateConnection` is reflected in the event.
-				captureMistakeLimitReached(this.telemetry, {
-					ulid: this.config.sessionId ?? this.conversation.getConversationId(),
-					model: this.config.modelId,
-					provider: this.config.providerId,
-					reason: context.reason,
-					consecutiveMistakes: context.consecutiveMistakes,
-					maxConsecutiveMistakes: context.maxConsecutiveMistakes,
-					agentId: this.agentId,
-					conversationId: this.conversation.getConversationId(),
-					parentAgentId: this.parentAgentId,
-					isSubagent: Boolean(this.parentAgentId),
-				});
-			},
 			emit: (event) => this.emitLegacyEvent(event),
 			log: (level, message, metadata) =>
 				leveledLog(this.logger, level, message, metadata),
 			agentId: this.agentId,
 			getConversationId: () => this.conversation.getConversationId(),
 			getActiveRunId: () => this.activeRunId ?? "",
-			appendRecoveryNotice: (message, _reason) => {
+			appendRecoveryNotice: (message) => {
 				this.conversation.appendMessage({
 					role: "user",
 					content: [{ type: "text", text: message }],
@@ -476,7 +448,7 @@ export class SessionRuntime {
 	 * registry is initialized (§`ensureExtensionsInitialized`), and
 	 * the snapshot reflects everything extensions registered via
 	 * `api.registerTool` / `registerCommand` / `registerMessageBuilder`
-	 * / `registerProvider` / `registerAutomationEventType`.
+	 * / `registerProvider`.
 	 */
 	getExtensionRegistry(): AgentExtensionRegistry<AgentTool, Message[]> {
 		return this.contributionRegistry.getRegistrySnapshot();
@@ -498,15 +470,11 @@ export class SessionRuntime {
 		this.config = { ...this.config, tools: merged };
 	}
 
-	/** Mutate provider / reasoning fields for subsequent runs. */
+	/** Mutate model / reasoning fields for subsequent runs. */
 	updateConnection(overrides: ConnectionOverrides): void {
 		const updates = normalizeConnectionUpdate(overrides);
 		const next: AgentConfig = { ...this.config };
-		if (updates.providerId !== undefined) next.providerId = updates.providerId;
 		if (updates.modelId !== undefined) next.modelId = updates.modelId;
-		if (updates.apiKey !== undefined) next.apiKey = updates.apiKey;
-		if (updates.baseUrl !== undefined) next.baseUrl = updates.baseUrl;
-		if (updates.headers !== undefined) next.headers = updates.headers;
 		if (updates.providerConfig !== undefined)
 			next.providerConfig = updates.providerConfig;
 		if (Object.hasOwn(updates, "reasoningEffort")) {
@@ -695,44 +663,13 @@ export class SessionRuntime {
 		isContinue: boolean;
 	}): Promise<AgentResult> {
 		let activePromise!: Promise<AgentResult>;
-		activePromise = this.executeRunWithAuthRetry(input).finally(() => {
+		activePromise = this.executeRunInternal(input).finally(() => {
 			if (this.activeRunPromise === activePromise) {
 				this.activeRunPromise = null;
 			}
 		});
 		this.activeRunPromise = activePromise;
 		return activePromise;
-	}
-
-	/**
-	 * Retry a run once when it failed with an auth-like error and the host
-	 * refreshed credentials via `config.onAuthError`. The failed attempt's
-	 * trail is already persisted to the conversation store, so the retry
-	 * continues from where the stream died instead of replaying the run.
-	 */
-	private async executeRunWithAuthRetry(input: {
-		userMessage?: string;
-		userImages?: string[];
-		userFiles?: string[];
-		isContinue: boolean;
-	}): Promise<AgentResult> {
-		const result = await this.executeRunInternal(input);
-		if (
-			result.finishReason !== "error" ||
-			!this.config.onAuthError ||
-			!isLikelyAuthError(result.text)
-		) {
-			return result;
-		}
-		const refreshed = await this.config.onAuthError().catch(() => false);
-		if (!refreshed) {
-			return result;
-		}
-		const retryResult = await this.executeRunInternal({ isContinue: true });
-		captureAuthRunRetry(this.telemetry, this.config.providerId, {
-			recovered: retryResult.finishReason !== "error",
-		});
-		return retryResult;
 	}
 
 	private async executeRunInternal(input: {
@@ -793,11 +730,7 @@ export class SessionRuntime {
 
 		// Build the AgentRuntime for this turn.
 		const systemPrompt = await this.composeSystemPrompt();
-		const agentModel = createAgentModelFromConfig(
-			this.config,
-			this.logger,
-			this.telemetry,
-		);
+		const agentModel = createAgentModelFromConfig(this.config, this.logger);
 		// Merge extension-contributed tools with the config-declared
 		// tools for this turn. Extensions register tools via
 		// `api.registerTool` during `setup()` — parity with legacy
@@ -814,6 +747,7 @@ export class SessionRuntime {
 		const extensionTools = filterAvailableExtensionTools(
 			[...extensionToolsByName.values()],
 			this.config.toolPolicies,
+			this.config.mode,
 		);
 		const mergedToolsByName = new Map<string, AgentTool>();
 		for (const tool of extensionTools) {
@@ -842,13 +776,11 @@ export class SessionRuntime {
 			parentAgentId: this.parentAgentId,
 			model: agentModel,
 			logger: this.logger,
-			telemetry: this.telemetry,
 			tools,
 			toolContextMetadata: {
 				modelSupportsImages:
 					modelInfo?.capabilities?.includes("images") ?? true,
 				...this.config.toolContextMetadata,
-				[CLINE_INTERNAL_TELEMETRY_METADATA_KEY]: this.telemetry,
 			},
 			hooks: this.createRuntimeHooks(),
 			prepareTurn: this.createRuntimePrepareTurn(modelInfo, tools),

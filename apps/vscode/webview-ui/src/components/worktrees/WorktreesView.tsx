@@ -1,12 +1,14 @@
-import { EmptyRequest } from "@shared/proto/cline/common"
-import { NewTaskRequest } from "@shared/proto/cline/task"
-import type { MergeWorktreeResult, Worktree as WorktreeProto } from "@shared/proto/cline/worktree"
+import { EmptyRequest } from "@shared/proto/bedrock_coder/common"
+import { NewTaskRequest } from "@shared/proto/bedrock_coder/task"
+import type { MergeWorktreeResult, Worktree as WorktreeProto } from "@shared/proto/bedrock_coder/worktree"
 import {
 	CreateWorktreeIncludeRequest,
 	DeleteWorktreeRequest,
+	InspectWorktreeMutationRequest,
 	MergeWorktreeRequest,
 	SwitchWorktreeRequest,
-} from "@shared/proto/cline/worktree"
+	type WorktreeMutationInspection,
+} from "@shared/proto/bedrock_coder/worktree"
 import { VSCodeButton, VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import { AlertCircle, Check, ExternalLink, FolderOpen, GitBranch, GitMerge, Loader2, Plus, Trash2, X } from "lucide-react"
 import { memo, useCallback, useEffect, useState } from "react"
@@ -16,6 +18,7 @@ import { FileServiceClient, TaskServiceClient, WorktreeServiceClient } from "@/s
 import { getEnvironmentColor } from "@/utils/environmentColors"
 import CreateWorktreeModal from "./CreateWorktreeModal"
 import DeleteWorktreeModal from "./DeleteWorktreeModal"
+import WorktreeMutationPreview from "./WorktreeMutationPreview"
 
 type WorktreesViewProps = {
 	onDone: () => void
@@ -39,6 +42,8 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 	const [mergeError, setMergeError] = useState<string | null>(null)
 	const [mergeResult, setMergeResult] = useState<MergeWorktreeResult | null>(null)
 	const [deleteAfterMerge, setDeleteAfterMerge] = useState(true)
+	const [mergeInspection, setMergeInspection] = useState<WorktreeMutationInspection>()
+	const [isInspectingMerge, setIsInspectingMerge] = useState(false)
 
 	// .worktreeinclude status
 	const [hasWorktreeInclude, setHasWorktreeInclude] = useState(false)
@@ -127,7 +132,7 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 	}, [loadWorktrees])
 
 	const handleDeleteWorktree = useCallback(
-		async (path: string, deleteBranch: boolean, branchName: string) => {
+		async (path: string, deleteBranch: boolean, branchName: string, allowDirty: boolean) => {
 			try {
 				const result = await WorktreeServiceClient.deleteWorktree(
 					DeleteWorktreeRequest.create({
@@ -135,6 +140,8 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 						force: false,
 						deleteBranch,
 						branchName,
+						approved: true,
+						allowDirty,
 					}),
 				)
 
@@ -170,18 +177,33 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 	}, [worktrees])
 
 	// Open merge modal for a worktree
-	const openMergeModal = useCallback((worktree: WorktreeProto) => {
-		setMergeWorktree(worktree)
-		setMergeError(null)
-		setMergeResult(null)
-		setDeleteAfterMerge(true)
-	}, [])
+	const openMergeModal = useCallback(
+		(worktree: WorktreeProto) => {
+			setMergeWorktree(worktree)
+			setMergeError(null)
+			setMergeResult(null)
+			setDeleteAfterMerge(true)
+			setIsInspectingMerge(true)
+			void WorktreeServiceClient.inspectWorktreeMutation(
+				InspectWorktreeMutationRequest.create({
+					operation: "merge",
+					worktreePath: worktree.path,
+					targetBranch: getMainBranch(),
+				}),
+			)
+				.then(setMergeInspection)
+				.catch((cause) => setMergeError(cause instanceof Error ? cause.message : String(cause)))
+				.finally(() => setIsInspectingMerge(false))
+		},
+		[getMainBranch],
+	)
 
 	// Close merge modal
 	const closeMergeModal = useCallback(() => {
 		setMergeWorktree(null)
 		setMergeError(null)
 		setMergeResult(null)
+		setMergeInspection(undefined)
 	}, [])
 
 	// Handle merge
@@ -198,6 +220,7 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 					worktreePath: mergeWorktree.path,
 					targetBranch: getMainBranch(),
 					deleteAfterMerge,
+					approved: true,
 				}),
 			)
 
@@ -216,8 +239,8 @@ const WorktreesView = ({ onDone }: WorktreesViewProps) => {
 		}
 	}, [mergeWorktree, getMainBranch, deleteAfterMerge, loadWorktrees])
 
-	// Ask Cline to resolve conflicts
-	const handleAskClineToResolve = useCallback(async () => {
+	// Ask BedrockCoder to resolve conflicts
+	const handleAskBedrockCoderToResolve = useCallback(async () => {
 		if (!mergeResult || !mergeResult.hasConflicts) return
 
 		const conflictList = mergeResult.conflictingFiles.join(", ")
@@ -232,7 +255,7 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 			// Close worktrees view to show the chat with the new task
 			onDone()
 		} catch (err) {
-			setMergeError(err instanceof Error ? err.message : "Failed to create task for Cline")
+			setMergeError(err instanceof Error ? err.message : "Failed to create task for Bedrock Coder")
 		}
 	}, [mergeResult, mergeWorktree, closeMergeModal, onDone])
 
@@ -251,10 +274,10 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 				{/* Description */}
 				<p className="text-sm text-[var(--vscode-descriptionForeground)] m-0 mb-4">
 					Git worktrees let you work on multiple branches at the same time, each in its own folder. Open worktrees in
-					their own windows so Cline can work on multiple tasks in parallel.{" "}
+					their own windows so Bedrock Coder can work on multiple tasks in parallel.{" "}
 					<a
 						className="text-[var(--vscode-textLink-foreground)] hover:text-[var(--vscode-textLink-activeForeground)]"
-						href="https://docs.cline.bot/features/worktrees"
+						href="https://github.com/FFFalexgo/AWS_Bedrock_Coder#readme"
 						rel="noopener noreferrer"
 						style={{ fontSize: "inherit" }}
 						target="_blank">
@@ -276,7 +299,7 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 								.worktreeinclude detected.{" "}
 								<a
 									className="text-[var(--vscode-textLink-foreground)] hover:text-[var(--vscode-textLink-activeForeground)]"
-									href="https://docs.cline.bot/features/worktrees#worktreeinclude"
+									href="https://github.com/FFFalexgo/AWS_Bedrock_Coder#readme"
 									rel="noopener noreferrer"
 									style={{ fontSize: "inherit" }}
 									target="_blank">
@@ -297,7 +320,7 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 									to new worktrees, so you don't have to reinstall dependencies.{" "}
 									<a
 										className="text-[var(--vscode-textLink-foreground)] hover:text-[var(--vscode-textLink-activeForeground)]"
-										href="https://docs.cline.bot/features/worktrees#worktreeinclude"
+										href="https://github.com/FFFalexgo/AWS_Bedrock_Coder#readme"
 										rel="noopener noreferrer"
 										style={{ fontSize: "inherit" }}
 										target="_blank">
@@ -422,6 +445,11 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 													Locked
 												</span>
 											)}
+											{worktree.isDirty && (
+												<span className="text-xs px-1.5 py-0.5 rounded bg-[var(--vscode-inputValidation-warningBackground)] text-[var(--vscode-inputValidation-warningForeground)]">
+													Dirty
+												</span>
+											)}
 										</div>
 										{/* Right side: action buttons */}
 										<div className="flex items-center gap-1">
@@ -509,7 +537,10 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 			<DeleteWorktreeModal
 				branchName={deleteWorktree?.branch || ""}
 				onClose={() => setDeleteWorktree(null)}
-				onConfirm={(deleteBranch) => handleDeleteWorktree(deleteWorktree!.path, deleteBranch, deleteWorktree!.branch)}
+				onConfirm={(deleteBranch, allowDirty) => {
+					if (!deleteWorktree) return Promise.resolve()
+					return handleDeleteWorktree(deleteWorktree.path, deleteBranch, deleteWorktree.branch || "", allowDirty)
+				}}
 				open={!!deleteWorktree}
 				worktreePath={deleteWorktree?.path || ""}
 			/>
@@ -573,8 +604,8 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 								</div>
 
 								<div className="flex flex-col gap-2">
-									<VSCodeButton onClick={handleAskClineToResolve} style={{ width: "100%" }}>
-										Ask Cline to Resolve
+									<VSCodeButton onClick={handleAskBedrockCoderToResolve} style={{ width: "100%" }}>
+										Ask Bedrock Coder to Resolve
 									</VSCodeButton>
 									<VSCodeButton appearance="secondary" onClick={closeMergeModal} style={{ width: "100%" }}>
 										I'll Resolve Manually
@@ -603,6 +634,13 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 									/>
 									<span className="text-sm">Delete worktree after successful merge</span>
 								</label>
+								<WorktreeMutationPreview inspection={mergeInspection} loading={isInspectingMerge} />
+								{deleteAfterMerge && mergeWorktree && (
+									<p className="m-0 break-all font-mono text-xs">
+										After merge: git worktree remove {mergeWorktree.path}; git branch -d{" "}
+										{mergeWorktree.branch}
+									</p>
+								)}
 
 								{mergeError && (
 									<div className="flex items-start gap-2 p-3 rounded bg-[var(--vscode-inputValidation-errorBackground)] border border-[var(--vscode-inputValidation-errorBorder)]">
@@ -615,7 +653,9 @@ Please help me resolve these merge conflicts, then complete the merge, and delet
 									<VSCodeButton appearance="secondary" disabled={isMerging} onClick={closeMergeModal}>
 										Cancel
 									</VSCodeButton>
-									<VSCodeButton disabled={isMerging} onClick={handleMergeWorktree}>
+									<VSCodeButton
+										disabled={isMerging || isInspectingMerge || !mergeInspection?.allowed}
+										onClick={handleMergeWorktree}>
 										{isMerging ? (
 											<>
 												<Loader2 className="w-4 h-4 mr-1 animate-spin" />

@@ -206,7 +206,7 @@ export class VscodeTerminalManager {
 		// Cast to VSCode-specific TerminalInfo for internal use
 		// Using unknown as intermediate cast due to structural differences between ITerminal and vscode.Terminal
 		const vscodeTerminalInfo = terminalInfo as unknown as TerminalInfo
-		Logger.log(`[TerminalManager] Running command on terminal ${vscodeTerminalInfo.id}: "${command}"`)
+		Logger.log(`[TerminalManager] Running approved command on terminal ${vscodeTerminalInfo.id}`)
 		Logger.log(`[TerminalManager] Terminal ${vscodeTerminalInfo.id} busy state before: ${vscodeTerminalInfo.busy}`)
 
 		try {
@@ -226,7 +226,7 @@ export class VscodeTerminalManager {
 		})
 		process.once("error", () => {
 			// A stream/API failure does not prove the launched command stopped.
-			// Evict the terminal from Cline reuse without disposing potentially
+			// Evict the terminal from BedrockCoder reuse without disposing potentially
 			// active user work.
 			this.evictTerminal(vscodeTerminalInfo)
 		})
@@ -234,7 +234,7 @@ export class VscodeTerminalManager {
 		process.once("unobserved_command", (outcome) => {
 			Logger.log(`unobserved_command (${outcome.source}) received for terminal ${vscodeTerminalInfo.id}`)
 			this.evictTerminal(vscodeTerminalInfo)
-			// Markerless streams (for example, an SSH session) and commands Cline no
+			// Markerless streams (for example, an SSH session) and commands BedrockCoder no
 			// longer owns remain open. Ordinary managed sendText fallbacks are
 			// reclaimed at the next acquisition, after this tool result can report
 			// that their completion is indeterminate.
@@ -316,7 +316,7 @@ export class VscodeTerminalManager {
 		const effectiveExpected = VscodeTerminalManager.effectiveShellPath(expectedShellPath)
 
 		// Find available terminal from our pool first (created for this task)
-		Logger.log(`[TerminalManager] Looking for terminal in cwd: ${cwd}`)
+		Logger.log("[TerminalManager] Looking for terminal in the active workspace")
 		Logger.log(`[TerminalManager] Available terminals: ${terminals.length}`)
 
 		const matchingTerminal = terminals.find((t) => {
@@ -328,13 +328,13 @@ export class VscodeTerminalManager {
 			if (VscodeTerminalManager.effectiveShellPath(t.shellPath) !== effectiveExpected) {
 				return false
 			}
-			const terminalCwd = t.terminal.shellIntegration?.cwd // one of cline's commands could have changed the cwd of the terminal
+			const terminalCwd = t.terminal.shellIntegration?.cwd // one of bedrockCoder's commands could have changed the cwd of the terminal
 			if (!terminalCwd) {
 				Logger.log(`[TerminalManager] Terminal ${t.id} has no cwd, skipping`)
 				return false
 			}
 			const matches = arePathsEqual(vscode.Uri.file(cwd).fsPath, terminalCwd.fsPath)
-			Logger.log(`[TerminalManager] Terminal ${t.id} cwd: ${terminalCwd.fsPath}, matches: ${matches}`)
+			Logger.log(`[TerminalManager] Terminal ${t.id} workspace match: ${matches}`)
 			return matches
 		})
 		if (matchingTerminal) {

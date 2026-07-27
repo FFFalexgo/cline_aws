@@ -1,9 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import { Logger } from "@/shared/services/Logger"
-import { version as clineVersion } from "../../../package.json"
-import { getDistinctId } from "../../services/logging/distinctId"
-import { telemetryService } from "../../services/telemetry"
+import { version as bedrockCoderVersion } from "../../../package.json"
 import {
 	HookInput,
 	HookModelContext,
@@ -17,7 +15,7 @@ import {
 	TaskResumeData,
 	TaskStartData,
 	UserPromptSubmitData,
-} from "../../shared/proto/cline/hooks"
+} from "../../shared/proto/bedrock_coder/hooks"
 import { getAllHooksDirs } from "../storage/disk"
 import { StateManager } from "../storage/StateManager"
 import { HookExecutionError } from "./HookError"
@@ -139,7 +137,7 @@ type HookName = keyof Hooks
 
 /**
  * The hook input parameters for a named hook. These are the parameters the caller must
- * provide--the other common parameters like clineVersion and userId are handled by the
+ * provide--the other common parameters like bedrockCoderVersion and userId are handled by the
  * hook system.
  */
 export type NamedHookInput<Name extends HookName> = {
@@ -183,11 +181,11 @@ export abstract class HookRunner<Name extends HookName> {
 	 *
 	 * This method enriches the hook-specific input (like preToolUse or postToolUse data)
 	 * with standard information that all hooks receive:
-	 * - clineVersion: Current Cline extension version
+	 * - bedrockCoderVersion: Current BedrockCoder extension version
 	 * - hookName: The type of hook being executed (e.g., "PreToolUse")
 	 * - timestamp: Execution time in milliseconds since epoch
 	 * - workspaceRoots: Array of workspace folder paths
-	 * - userId: Cline user ID, machine ID, or generated UUID
+	 * - userId: BedrockCoder user ID, machine ID, or generated UUID
 	 *
 	 * This separation allows hook scripts to receive consistent metadata without
 	 * requiring callers to manually provide it each time.
@@ -207,11 +205,11 @@ export abstract class HookRunner<Name extends HookName> {
 		}
 
 		return {
-			clineVersion,
+			bedrockCoderVersion,
 			hookName: this.hookName,
 			timestamp: Date.now().toString(),
 			workspaceRoots,
-			userId: getDistinctId(), // Always available: Cline User ID, machine ID, or generated UUID
+			userId: "local",
 			...params,
 			model,
 		}
@@ -263,7 +261,6 @@ export type HookStreamCallback = (
  * - Parses JSON output from stdout, attempting to extract it even if mixed with debug output
  * - Truncates context modifications that exceed 50KB to prevent prompt overflow
  * - Handles both successful and failed executions gracefully
- * - Emits per-hook telemetry with source attribution (global or workspace)
  *
  * Error handling:
  * - Treats hooks as "fail-open": only shouldContinue:false blocks tool execution
@@ -279,29 +276,12 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 		private readonly source: "global" | "workspace",
 		private readonly streamCallback?: HookStreamCallback,
 		private readonly abortSignal?: AbortSignal,
-		private readonly taskId?: string,
-		private readonly toolName?: string,
 		private readonly cwd?: string,
 	) {
 		super(hookName)
 	}
 
 	override async [exec](input: HookInput): Promise<HookOutput> {
-		const startTime = performance.now()
-		const taskId = this.taskId // Local const for type narrowing in closures
-
-		// Capture telemetry at the start of individual hook execution
-		if (taskId) {
-			telemetryService.safeCapture(
-				() =>
-					telemetryService.captureHookExecution(taskId, this.hookName, "started", {
-						source: this.source,
-						toolName: this.toolName,
-					}),
-				"HookFactory.exec.started",
-			)
-		}
-
 		// Check if already aborted before starting
 		if (this.abortSignal?.aborted) {
 			throw HookExecutionError.cancellation(this.scriptPath)
@@ -453,46 +433,11 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 
 			// If we have valid JSON, honor it regardless of exit code
 			if (parsedOutput) {
-				const durationMs = performance.now() - startTime
-
 				// Log warning if non-zero exit but valid JSON (for developers)
 				if (exitCode !== 0) {
 					Logger.warn(`[Hook ${this.hookName}] Exited with code ${exitCode} but provided valid JSON response`)
 					if (stderr) {
 						Logger.warn(`[Hook ${this.hookName}] stderr: ${stderr}`)
-					}
-				}
-
-				// Capture success/cancellation telemetry
-				if (taskId) {
-					if (parsedOutput.cancel) {
-						telemetryService.safeCapture(
-							() =>
-								telemetryService.captureHookExecution(taskId, this.hookName, "completed", {
-									source: this.source,
-									toolName: this.toolName,
-									durationMs,
-									exitCode: exitCode ?? EXIT_CODE_SIGINT,
-									cancelRequested: true,
-									contextModified: !!parsedOutput.contextModification,
-									contextSize: parsedOutput.contextModification?.length,
-								}),
-							"HookFactory.exec.completed.cancel",
-						)
-					} else {
-						telemetryService.safeCapture(
-							() =>
-								telemetryService.captureHookExecution(taskId, this.hookName, "completed", {
-									source: this.source,
-									toolName: this.toolName,
-									durationMs,
-									exitCode: exitCode ?? 0,
-									cancelRequested: false,
-									contextModified: !!parsedOutput.contextModification,
-									contextSize: parsedOutput.contextModification?.length,
-								}),
-							"HookFactory.exec.completed.success",
-						)
 					}
 				}
 
@@ -503,24 +448,6 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 			if (exitCode === 0) {
 				// Hook succeeded but didn't provide JSON - allow execution (no cancellation)
 				Logger.warn(`[Hook ${this.hookName}] Completed successfully but no JSON response found`)
-				const durationMs = performance.now() - startTime
-
-				// Capture success telemetry even without JSON
-				if (taskId) {
-					telemetryService.safeCapture(
-						() =>
-							telemetryService.captureHookExecution(taskId, this.hookName, "completed", {
-								source: this.source,
-								toolName: this.toolName,
-								durationMs,
-								exitCode: 0,
-								cancelRequested: false,
-								contextModified: false,
-							}),
-						"HookFactory.exec.completed.noJson",
-					)
-				}
-
 				return HookOutput.create({
 					cancel: false,
 				})
@@ -528,48 +455,8 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 			// Hook failed with non-zero exit - include hook name in error
 			throw HookExecutionError.execution(this.scriptPath, exitCode ?? 1, stderr, this.hookName)
 		} catch (error) {
-			const durationMs = performance.now() - startTime
-
 			// If it's already a HookExecutionError, re-throw it
 			if (HookExecutionError.isHookError(error)) {
-				// Capture failure telemetry based on error type
-				if (taskId) {
-					if (error.errorInfo.type === "cancellation") {
-						telemetryService.safeCapture(
-							() =>
-								telemetryService.captureHookExecution(taskId, this.hookName, "cancelled", {
-									source: this.source,
-									toolName: this.toolName,
-								}),
-							"HookFactory.exec.error.cancellation",
-						)
-					} else if (error.errorInfo.type === "timeout") {
-						telemetryService.safeCapture(
-							() =>
-								telemetryService.captureHookExecution(taskId, this.hookName, "failed", {
-									source: this.source,
-									toolName: this.toolName,
-									durationMs,
-									errorType: "timeout",
-									errorMessage: error.message,
-								}),
-							"HookFactory.exec.error.timeout",
-						)
-					} else {
-						telemetryService.safeCapture(
-							() =>
-								telemetryService.captureHookExecution(taskId, this.hookName, "failed", {
-									source: this.source,
-									toolName: this.toolName,
-									durationMs,
-									exitCode: error.errorInfo.exitCode ?? 1,
-									errorType: error.errorInfo.type as "execution" | "timeout" | "validation",
-									errorMessage: error.message,
-								}),
-							"HookFactory.exec.error.failed",
-						)
-					}
-				}
 				throw error
 			}
 
@@ -579,52 +466,15 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 
 			// Check for timeout
 			if (error instanceof Error && error.message.includes("timed out")) {
-				if (taskId) {
-					telemetryService.safeCapture(
-						() =>
-							telemetryService.captureHookExecution(taskId, this.hookName, "failed", {
-								source: this.source,
-								toolName: this.toolName,
-								durationMs,
-								errorType: "timeout",
-								errorMessage: error.message,
-							}),
-						"HookFactory.exec.catch.timeout",
-					)
-				}
 				throw HookExecutionError.timeout(this.scriptPath, HOOK_EXECUTION_TIMEOUT_MS, stderr, this.hookName)
 			}
 
 			// Check for cancellation
 			if (error instanceof Error && error.message.includes("cancelled")) {
-				if (taskId) {
-					telemetryService.safeCapture(
-						() =>
-							telemetryService.captureHookExecution(taskId, this.hookName, "cancelled", {
-								source: this.source,
-								toolName: this.toolName,
-							}),
-						"HookFactory.exec.catch.cancelled",
-					)
-				}
 				throw HookExecutionError.cancellation(this.scriptPath, this.hookName)
 			}
 
 			// Generic execution error - include hook name
-			if (taskId) {
-				telemetryService.safeCapture(
-					() =>
-						telemetryService.captureHookExecution(taskId, this.hookName, "failed", {
-							source: this.source,
-							toolName: this.toolName,
-							durationMs,
-							exitCode: exitCode ?? 1,
-							errorType: "execution",
-							errorMessage: error instanceof Error ? error.message : String(error),
-						}),
-					"HookFactory.exec.catch.execution",
-				)
-			}
 			throw HookExecutionError.execution(this.scriptPath, exitCode ?? 1, stderr, this.hookName)
 		}
 	}
@@ -633,8 +483,8 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 /**
  * Combines multiple hook runners and executes them in parallel.
  *
- * Used in multi-root workspaces where both global hooks (from ~/Documents/Cline/Hooks/)
- * and workspace-specific hooks (from each workspace's .clinerules/hooks/) exist for the
+ * Used in multi-root workspaces where both global hooks (from ~/.bedrock-coder/Hooks/)
+ * and workspace-specific hooks (from each workspace's .bedrock-coder/hooks/) exist for the
  * same hook type.
  *
  * Behavior:
@@ -703,7 +553,7 @@ function isExpectedHookError(error: unknown): boolean {
 	}
 
 	// Expected: Permission denied (file not executable or not readable)
-	// Note: This is expected because users may have hooks in .clinerules that they don't want to execute
+	// Note: This is expected because users may have hooks in .bedrock-coder that they don't want to execute
 	if (nodeError.code === "EACCES") {
 		return true
 	}
@@ -745,8 +595,8 @@ export class HookFactory {
 	/**
 	 * Create a hook runner without streaming support (backwards compatible)
 	 */
-	async create<Name extends HookName>(hookName: Name, taskId?: string, toolName?: string): Promise<HookRunner<Name>> {
-		return this.createWithStreaming(hookName, undefined, undefined, taskId, toolName)
+	async create<Name extends HookName>(hookName: Name): Promise<HookRunner<Name>> {
+		return this.createWithStreaming(hookName)
 	}
 
 	/**
@@ -765,33 +615,19 @@ export class HookFactory {
 	 * @param hookName The type of hook to create (e.g., "PreToolUse", "PostToolUse")
 	 * @param streamCallback Optional callback for real-time output streaming
 	 * @param abortSignal Optional signal to cancel hook execution
-	 * @param taskId Optional task ID for telemetry context
-	 * @param toolName Optional tool name for telemetry context
 	 * @returns A HookRunner that executes the hook(s), or NoOpRunner if none found
 	 */
 	async createWithStreaming<Name extends HookName>(
 		hookName: Name,
 		streamCallback?: HookStreamCallback,
 		abortSignal?: AbortSignal,
-		taskId?: string,
-		toolName?: string,
 	): Promise<HookRunner<Name>> {
 		// Use cache for hook discovery instead of direct file system scan
 		const { HookDiscoveryCache } = await import("./HookDiscoveryCache")
 		const scripts = await HookDiscoveryCache.getInstance().get(hookName)
 
-		// Fetch hooks dirs once for source determination and telemetry
+		// Fetch hooks dirs once for source and cwd determination.
 		const hooksDirs = await getAllHooksDirs()
-
-		// Capture hook discovery telemetry
-		// Categorize scripts by location (global vs workspace)
-		const { globalCount, workspaceCount } = this.categorizeHookScripts(scripts, hooksDirs)
-		if (scripts.length > 0) {
-			telemetryService.safeCapture(
-				() => telemetryService.captureHookDiscovery(hookName, globalCount, workspaceCount),
-				"HookFactory.createWithStreaming.discovery",
-			)
-		}
 
 		// Get workspace roots for cwd determination
 		const stateManager = StateManager.get()
@@ -805,7 +641,7 @@ export class HookFactory {
 		const runners = scripts.map((script) => {
 			const source = this.determineScriptSource(script, hooksDirs)
 			const cwd = this.determineHookCwd(script, hooksDirs, workspaceRoots, primaryCwd)
-			return new StdioHookRunner(hookName, script, source, streamCallback, abortSignal, taskId, toolName, cwd)
+			return new StdioHookRunner(hookName, script, source, streamCallback, abortSignal, cwd)
 		})
 
 		if (runners.length === 0) {
@@ -816,7 +652,7 @@ export class HookFactory {
 
 	/**
 	 * Checks if a hooks directory is a global hooks directory.
-	 * Global hooks are located in paths containing "Cline/Hooks" or "cline/hooks".
+	 * Global hooks are located in paths containing "BedrockCoder/Hooks" or "bedrock-coder/hooks".
 	 */
 	private static isGlobalHooksDir(dir: string): boolean {
 		return /[/\\][Cc]line[/\\][Hh]ooks/i.test(dir)
@@ -836,8 +672,8 @@ export class HookFactory {
 	/**
 	 * Determines the working directory for a hook script based on its location.
 	 *
-	 * - Global hooks (from ~/Documents/Cline/Hooks/): run from the primary workspace root
-	 * - Workspace hooks (from workspaceRoot/.clinerules/hooks/): run from that specific workspace root
+	 * - Global hooks (from ~/.bedrock-coder/Hooks/): run from the primary workspace root
+	 * - Workspace hooks (from workspaceRoot/.bedrock-coder/hooks/): run from that specific workspace root
 	 *
 	 * This ensures workspace-specific hooks can use relative paths that are meaningful
 	 * within their own workspace context.
@@ -862,7 +698,7 @@ export class HookFactory {
 		}
 
 		// If workspace hook, find which workspace root it belongs to
-		// Workspace hooks are at: workspaceRoot/.clinerules/hooks/
+		// Workspace hooks are at: workspaceRoot/.bedrock-coder/hooks/
 		// So find the workspace root whose path is a prefix of the containing hooks dir
 		if (containingDir && workspaceRoots) {
 			const workspaceRoot = workspaceRoots.find((root) => containingDir.startsWith(root.path))
@@ -876,38 +712,9 @@ export class HookFactory {
 	}
 
 	/**
-	 * Categorizes hook scripts by their location (global vs workspace).
-	 * Global hooks are located in ~/Documents/Cline/Hooks/
-	 * Workspace hooks are located in workspace .clinerules/hooks/ directories
-	 *
-	 * @param scripts Array of hook script paths
-	 * @param hooksDirs Array of hooks directories (passed to avoid redundant fetches)
-	 * @returns Object with globalCount and workspaceCount
-	 */
-	private categorizeHookScripts(scripts: string[], hooksDirs: string[]): { globalCount: number; workspaceCount: number } {
-		if (scripts.length === 0) {
-			return { globalCount: 0, workspaceCount: 0 }
-		}
-
-		let globalCount = 0
-		let workspaceCount = 0
-
-		for (const script of scripts) {
-			const containingDir = hooksDirs.find((dir) => script.startsWith(dir))
-			if (containingDir && HookFactory.isGlobalHooksDir(containingDir)) {
-				globalCount++
-			} else {
-				workspaceCount++
-			}
-		}
-
-		return { globalCount, workspaceCount }
-	}
-
-	/**
 	 * @returns A list of paths to scripts for the given hook name.
-	 * Includes both global hooks (from ~/Documents/Cline/Hooks/) and workspace hooks
-	 * (from .clinerules/hooks/ in each workspace root).
+	 * Includes both global hooks (from ~/.bedrock-coder/Hooks/) and workspace hooks
+	 * (from .bedrock-coder/hooks/ in each workspace root).
 	 */
 	private static async findHookScripts(hookName: HookName): Promise<string[]> {
 		const hookScripts = []
@@ -919,10 +726,10 @@ export class HookFactory {
 	}
 
 	/**
-	 * Finds the path to a hook in a .clinerules hooks directory.
+	 * Finds the path to a hook in a .bedrock-coder hooks directory.
 	 *
 	 * @param hookName the name of the hook to search for, for example 'PreToolUse'
-	 * @param hooksDir the .clinerules directory path to search
+	 * @param hooksDir the .bedrock-coder directory path to search
 	 * @returns the path to the hook to execute, or undefined if none found
 	 * @throws Error if an unexpected file system error occurs
 	 */
@@ -975,7 +782,7 @@ export class HookFactory {
 	 * with canonical extensionless hook names.
 	 *
 	 * @param hookName the name of the hook to search for
-	 * @param hooksDir the .clinerules directory path to search
+	 * @param hooksDir the .bedrock-coder directory path to search
 	 * @returns the path to the hook to execute, or undefined if none found
 	 * @throws Error if an unexpected file system error occurs
 	 */

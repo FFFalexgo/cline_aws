@@ -302,37 +302,6 @@ describe("SdkFollowupCoordinator", () => {
 		expect(options.postStateToWebview).toHaveBeenCalledOnce()
 	})
 
-	it("adds a legacy warning to initial messages when resuming a legacy task", async () => {
-		const task = makeTask("legacy-task")
-		const historyItem = {
-			id: "legacy-task",
-			ts: 1,
-			task: "Legacy task",
-			tokensIn: 0,
-			tokensOut: 0,
-			totalCost: 0,
-		}
-		const { coordinator, options } = makeCoordinator({ task, historyItem, isLegacyTask: true })
-		options.taskHistory.getLegacyResumeInitialMessages.mockResolvedValueOnce([
-			{ role: "user", content: "hello" },
-			{ role: "user", content: "warning" },
-		])
-
-		await coordinator.askResponse("continue")
-
-		expect(options.taskHistory.getLegacyResumeInitialMessages).toHaveBeenCalledWith("legacy-task", [
-			{ role: "user", content: "hello" },
-		])
-		expect(options.sessions.startNewSession).toHaveBeenCalledWith(
-			expect.objectContaining({
-				initialMessages: [
-					{ role: "user", content: "hello" },
-					{ role: "user", content: "warning" },
-				],
-			}),
-		)
-	})
-
 	it("echoes attachments on an attachment-only resume", async () => {
 		const task = makeTask("task-1")
 		const historyItem = {
@@ -369,19 +338,6 @@ describe("SdkFollowupCoordinator", () => {
 		)
 	})
 
-	it("emits auth errors when resume fails because the cline provider is unauthenticated", async () => {
-		const task = makeTask("task-1")
-		const { coordinator, options } = makeCoordinator({ task })
-		options.sessionConfigBuilder.build.mockRejectedValue(new Error("missing api key"))
-		options.isClineManagedProviderActive.mockReturnValue(true)
-
-		await coordinator.askResponse("continue")
-
-		expect(options.emitClineAuthError).toHaveBeenCalledOnce()
-		expect(options.onResumeFailed).toHaveBeenCalledOnce()
-		expect(options.postStateToWebview).toHaveBeenCalledOnce()
-	})
-
 	it("reports resume failures so the turn phase does not stay stuck in streaming", async () => {
 		const task = makeTask("task-1")
 		const { coordinator, options } = makeCoordinator({ task })
@@ -400,9 +356,9 @@ describe("SdkFollowupCoordinator", () => {
 
 function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 	const config = {
-		providerId: "anthropic",
+		providerId: "bedrock",
 		modelId: "model",
-		apiKey: "key",
+		connection: { region: "us-east-1" },
 	}
 	const tempHost = {
 		readMessages: vi.fn().mockResolvedValue([{ role: "user", content: "hello" }]),
@@ -434,8 +390,6 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 			findHistoryItem: vi.fn(() => input.historyItem),
 			updateTaskHistory: vi.fn().mockResolvedValue([]),
 			updateTaskHistoryItem: vi.fn().mockResolvedValue(undefined),
-			isLegacyTask: vi.fn().mockResolvedValue(input.isLegacyTask ?? false),
-			getLegacyResumeInitialMessages: vi.fn(async (_taskId: string, fallbackMessages?: unknown[]) => fallbackMessages),
 		},
 		sessionConfigBuilder: {
 			build: vi.fn().mockResolvedValue(config),
@@ -446,8 +400,6 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 		loadInitialMessages: vi.fn().mockResolvedValue([{ role: "user", content: "hello" }]),
 		buildStartSessionInput: vi.fn(() => ({ prompt: "start" })),
 		resolveContextMentions: vi.fn(async (text: string) => `resolved: ${text}`),
-		isClineManagedProviderActive: vi.fn(() => false),
-		emitClineAuthError: vi.fn(),
 		resetMessageTranslator: vi.fn(),
 		postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		waitForPendingRebuilds: input.waitForPendingRebuilds ?? vi.fn().mockResolvedValue(undefined),
@@ -472,8 +424,6 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 			findHistoryItem: ReturnType<typeof vi.fn>
 			updateTaskHistory: ReturnType<typeof vi.fn>
 			updateTaskHistoryItem: ReturnType<typeof vi.fn>
-			isLegacyTask: ReturnType<typeof vi.fn>
-			getLegacyResumeInitialMessages: ReturnType<typeof vi.fn>
 		}
 		sessionConfigBuilder: SdkFollowupCoordinatorOptions["sessionConfigBuilder"] & { build: ReturnType<typeof vi.fn> }
 		getTask: ReturnType<typeof vi.fn>
@@ -481,8 +431,6 @@ function makeCoordinator(input: Partial<MakeCoordinatorInput> = {}) {
 		getWorkspaceRoot: ReturnType<typeof vi.fn>
 		loadInitialMessages: ReturnType<typeof vi.fn>
 		resolveContextMentions: ReturnType<typeof vi.fn>
-		isClineManagedProviderActive: ReturnType<typeof vi.fn>
-		emitClineAuthError: ReturnType<typeof vi.fn>
 		resetMessageTranslator: ReturnType<typeof vi.fn>
 		postStateToWebview: ReturnType<typeof vi.fn>
 		onResumeFailed: ReturnType<typeof vi.fn>
@@ -508,7 +456,6 @@ interface MakeCoordinatorInput {
 		cwdOnTaskInitialization?: string
 	}
 	mode: "act" | "plan"
-	isLegacyTask: boolean
 	waitForPendingRebuilds: () => Promise<void>
 }
 

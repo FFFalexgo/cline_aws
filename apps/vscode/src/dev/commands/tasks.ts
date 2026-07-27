@@ -1,12 +1,11 @@
 import { Controller } from "@core/controller"
-import { ClineMessage } from "@shared/ExtensionMessage"
+import { BedrockCoderMessage } from "@shared/ExtensionMessage"
 import { HistoryItem } from "@shared/HistoryItem"
 import * as fs from "fs/promises"
 import * as path from "path"
 import * as vscode from "vscode"
 import { HostProvider } from "@/hosts/host-provider"
 import { ShowMessageType } from "@/shared/proto/host/window"
-import { Logger } from "@/shared/services/Logger"
 
 /**
  * Registers development-only commands for task manipulation.
@@ -14,46 +13,7 @@ import { Logger } from "@/shared/services/Logger"
  */
 export function registerTaskCommands(controller: Controller): vscode.Disposable[] {
 	return [
-		vscode.commands.registerCommand("cline.dev.expireMcpOAuthTokens", async () => {
-			try {
-				// OAuth tokens live in the shared MCP settings file (per-server
-				// `oauth.tokens`). Invalidate each access_token so the next request
-				// gets a 401 and the MCP SDK exercises the refresh_token flow.
-				const settingsPath = await controller.mcpHub.getMcpSettingsFilePath()
-				const content = JSON.parse(await fs.readFile(settingsPath, "utf-8"))
-				const servers = (content?.mcpServers ?? {}) as Record<string, { oauth?: { tokens?: { access_token?: string } } }>
-				let expiredCount = 0
-
-				for (const [name, server] of Object.entries(servers)) {
-					if (server?.oauth?.tokens?.access_token) {
-						server.oauth.tokens.access_token = "expired-by-dev-command"
-						expiredCount++
-						Logger.log(`[Dev] Invalidated access token for server: ${name}`)
-					}
-				}
-
-				if (expiredCount === 0) {
-					vscode.window.showInformationMessage("No MCP OAuth tokens found - no servers are authenticated")
-					return
-				}
-
-				await fs.writeFile(settingsPath, JSON.stringify(content, null, 2))
-
-				const action = await vscode.window.showInformationMessage(
-					`Expired ${expiredCount} MCP OAuth token(s). Reload window to test token refresh flow.`,
-					"Reload Window",
-					"Cancel",
-				)
-
-				if (action === "Reload Window") {
-					vscode.commands.executeCommand("workbench.action.reloadWindow")
-				}
-			} catch (error) {
-				vscode.window.showErrorMessage(`Failed to expire tokens: ${error}`)
-				Logger.error("[Dev] Error expiring MCP OAuth tokens:", error)
-			}
-		}),
-		vscode.commands.registerCommand("cline.dev.createTestTasks", async () => {
+		vscode.commands.registerCommand("bedrockCoder.dev.createTestTasks", async () => {
 			const count = (
 				await HostProvider.window.showInputBox({
 					title: "Test Tasks",
@@ -154,7 +114,7 @@ export function registerTaskCommands(controller: Controller): vscode.Disposable[
 /**
  * Creates a realistic sequence of messages that would occur in a typical task
  */
-function createRealisticMessageSequence(baseTimestamp: number, taskPrompt: string, taskIndex: number): ClineMessage[] {
+function createRealisticMessageSequence(baseTimestamp: number, taskPrompt: string, taskIndex: number): BedrockCoderMessage[] {
 	// Use an incrementing timestamp to ensure messages appear in sequence
 	let timestamp = baseTimestamp
 	const getNextTimestamp = () => {
@@ -167,8 +127,8 @@ function createRealisticMessageSequence(baseTimestamp: number, taskPrompt: strin
 	const commitHash = `commit${taskIndex}${Math.floor(Math.random() * 1000000).toString(16)}`
 
 	// Create a realistic message sequence
-	const messages: ClineMessage[] = [
-		// Initial task message - uses "say" with "text" which is the format used in Cline.ts
+	const messages: BedrockCoderMessage[] = [
+		// Initial task message - uses "say" with "text" which is the format used in BedrockCoder.ts
 		{
 			ts: baseTimestamp,
 			type: "say",

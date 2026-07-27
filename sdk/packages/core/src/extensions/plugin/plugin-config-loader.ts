@@ -4,13 +4,13 @@ import type {
 	AgentConfig,
 	PluginSetupContext,
 	WorkspaceInfo,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import {
 	discoverPluginModulePaths as discoverPluginModulePathsFromShared,
 	resolveConfiguredPluginModulePaths,
 	resolvePluginConfigSearchPaths as resolvePluginConfigSearchPathsFromShared,
 	SKILLS_CONFIG_DIRECTORY_NAME,
-} from "@cline/shared/storage";
+} from "@bedrock-coder/shared/storage";
 import { filterDisabledPluginPaths } from "../../services/global-settings";
 import type { PluginLoadDiagnostics } from "./plugin-load-report";
 import { loadAgentPluginsFromPathsWithDiagnostics } from "./plugin-loader";
@@ -97,10 +97,10 @@ function readDeclaredPluginEntryPaths(packageRoot: string): string[] {
 		const parsed = JSON.parse(
 			readFileSync(join(packageRoot, PACKAGE_JSON_FILE_NAME), "utf8"),
 		) as unknown;
-		if (!isRecord(parsed) || !isRecord(parsed.cline)) {
+		if (!isRecord(parsed) || !isRecord(parsed.bedrockCoder)) {
 			return [];
 		}
-		const entries = parsed.cline.plugins;
+		const entries = parsed.bedrockCoder.plugins;
 		if (!Array.isArray(entries)) {
 			return [];
 		}
@@ -245,10 +245,7 @@ export interface ResolveAndLoadAgentPluginsOptions
 	workspaceInfo?: WorkspaceInfo;
 	session?: PluginSetupContext["session"];
 	client?: PluginSetupContext["client"];
-	user?: PluginSetupContext["user"];
-	automation?: PluginSetupContext["automation"];
 	logger?: PluginSetupContext["logger"];
-	telemetry?: PluginSetupContext["telemetry"];
 }
 
 export async function resolveAndLoadAgentPlugins(
@@ -273,11 +270,8 @@ export async function resolveAndLoadAgentPlugins(
 			modelId: options.modelId,
 			session: options.session,
 			client: options.client,
-			user: options.user,
 			workspaceInfo: options.workspaceInfo,
-			automation: options.automation,
 			logger: options.logger,
-			telemetry: options.telemetry,
 		});
 		return {
 			extensions: report.plugins,
@@ -299,7 +293,6 @@ export async function resolveAndLoadAgentPlugins(
 		cwd: options.cwd,
 		session: options.session,
 		client: options.client,
-		user: options.user,
 		workspaceInfo: options.workspaceInfo,
 		logger: options.logger,
 	});

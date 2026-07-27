@@ -1,5 +1,5 @@
-import { EmptyRequest } from "@shared/proto/cline/common"
-import { WorktreeList } from "@shared/proto/cline/worktree"
+import { EmptyRequest } from "@shared/proto/bedrock_coder/common"
+import { WorktreeList } from "@shared/proto/bedrock_coder/worktree"
 import { getGitRootPath, listWorktrees as listWorktreesUtil } from "@utils/git-worktree"
 import { arePathsEqual, getWorkspacePath } from "@utils/path"
 import { HostProvider } from "@/hosts/host-provider"
@@ -68,6 +68,8 @@ export async function listWorktrees(_controller: Controller, _request: EmptyRequ
 				isDetached: wt.isDetached,
 				isLocked: wt.isLocked,
 				lockReason: wt.lockReason,
+				isDirty: wt.isDirty,
+				untrackedFiles: wt.untrackedFiles,
 			})),
 			isGitRepo: result.isGitRepo,
 			isMultiRoot: false,

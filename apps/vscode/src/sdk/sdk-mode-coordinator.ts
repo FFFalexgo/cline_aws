@@ -1,7 +1,6 @@
-import { getProviderAuthStorageId } from "@cline/core"
-import { createModeSwitchNoticeTracker, type ModeSwitchNotice, type ModeSwitchNoticeTracker } from "@cline/shared"
+import { createModeSwitchNoticeTracker, type ModeSwitchNotice, type ModeSwitchNoticeTracker } from "@bedrock-coder/shared"
 import type { ChatContent } from "@shared/ChatContent"
-import type { ClineMessage, TurnPhase } from "@shared/ExtensionMessage"
+import type { BedrockCoderMessage, TurnPhase } from "@shared/ExtensionMessage"
 import type { Mode } from "@shared/storage/types"
 import type { StateManager } from "@/core/storage/StateManager"
 import { Logger } from "@/shared/services/Logger"
@@ -18,10 +17,6 @@ type StartInput = Parameters<VscodeSessionHost["start"]>[0]
 type InitialMessages = StartInput["initialMessages"]
 type SessionConfig = Awaited<ReturnType<SdkSessionConfigBuilder["build"]>>
 
-function usesClineAccountAuth(providerId: string): boolean {
-	return getProviderAuthStorageId(providerId) === "cline"
-}
-
 export const ACT_MODE_CONTINUATION_PROMPT = "The user approved switching to act mode. Continue with the approved plan now."
 
 export interface SdkModeCoordinatorOptions {
@@ -34,7 +29,6 @@ export interface SdkModeCoordinatorOptions {
 	getWorkspaceRoot: () => Promise<string>
 	loadInitialMessages: (sdkHost: SdkSessionHost, sessionId: string) => Promise<unknown[]>
 	buildStartSessionInput: (config: SessionConfig, input: { cwd: string; mode: Mode }) => StartInput
-	emitClineAuthError: () => void
 	resetMessageTranslator: () => void
 	postStateToWebview: () => Promise<void>
 	/** Authoritative phase of the current turn, from the controller's TurnStateTracker. */
@@ -63,7 +57,7 @@ export class SdkModeCoordinator {
 	/**
 	 * Pending user-initiated mode switch, stamped as a <mode_notice> onto the
 	 * next outbound message by SdkSessionLifecycle.fireAndForgetSend. Shares the
-	 * CLI's round-trip-cancelling tracker (@cline/shared), scoped to the session
+	 * CLI's round-trip-cancelling tracker (@bedrock-coder/shared), scoped to the session
 	 * it was recorded for: unlike the CLI, the extension hops between tasks, and
 	 * a notice recorded while looking at task A must not leak onto a message
 	 * sent to task B (whose transcript never saw the "from" mode).
@@ -138,16 +132,6 @@ export class SdkModeCoordinator {
 		// The tool result told the model to proceed with the plan, so rebuild with
 		// act-mode tools and auto-continue rather than waiting for another user message.
 		await this.rebuildSessionForMode(target, { autoContinue: target === "act", source: "tool" })
-	}
-
-	async toggleActModeForYoloMode(): Promise<boolean> {
-		const currentMode = this.options.stateManager.getGlobalSettingsKey("mode")
-		if (currentMode === "act") {
-			return false
-		}
-		await this.options.stateManager.setGlobalState("mode", "act")
-		await this.options.postStateToWebview()
-		return true
 	}
 
 	async togglePlanActMode(modeToSwitchTo: Mode, chatContent?: ChatContent): Promise<boolean> {
@@ -256,22 +240,8 @@ export class SdkModeCoordinator {
 				cwd,
 				mode: newMode,
 			})
-			Logger.log(
-				`[SdkController] Mode rebuild config: mode=${newMode}, provider=${config.providerId}, model=${config.modelId}, hasApiKey=${!!config.apiKey}`,
-			)
+			Logger.log(`[SdkController] Mode rebuild config: mode=${newMode}, model=${config.modelId}`)
 			config.sessionId = oldSessionId
-
-			if (usesClineAccountAuth(config.providerId) && !config.apiKey) {
-				Logger.warn(
-					`[SdkController] Mode rebuild: new mode '${newMode}' provider is '${config.providerId}' but no Cline auth token - emitting auth error`,
-				)
-				// The session still runs with the old mode's tools, so roll the
-				// setting back to keep the UI toggle coherent with it.
-				this.options.stateManager.setGlobalState("mode", previousMode)
-				this.options.emitClineAuthError()
-				await this.options.postStateToWebview()
-				return false
-			}
 
 			const startInput = this.options.buildStartSessionInput(config, {
 				cwd,
@@ -319,7 +289,7 @@ export class SdkModeCoordinator {
 				// leave an echoed-but-never-sent user message in the transcript.
 				const prompt = userPrompt ? await this.options.resolveContextMentions(userPrompt) : ACT_MODE_CONTINUATION_PROMPT
 				if (userPrompt || userImages?.length || userFiles?.length) {
-					const userMessage: ClineMessage = {
+					const userMessage: BedrockCoderMessage = {
 						ts: Date.now(),
 						type: "say",
 						say: "user_feedback",
@@ -365,7 +335,7 @@ export class SdkModeCoordinator {
 				this.options.sessions.setRunning(false)
 				this.options.onAutoContinueFailed()
 			}
-			const errorMessage: ClineMessage = {
+			const errorMessage: BedrockCoderMessage = {
 				ts: Date.now(),
 				type: "say",
 				say: "error",
@@ -398,7 +368,7 @@ export class SdkModeCoordinator {
 			return
 		}
 
-		const current = task.messageStateHandler.getClineMessages()
+		const current = task.messageStateHandler.getBedrockCoderMessages()
 		const finalized = this.options.messages.finalizeMessagesForSave(current)
 		this.options.messages.appendMessages(finalized)
 	}

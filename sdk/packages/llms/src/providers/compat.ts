@@ -1,404 +1,93 @@
 import type {
+	AgentMessage,
+	AgentModel,
 	AgentModelEvent,
+	AgentModelRequest,
 	GatewayModelDefinition,
-	GatewayProviderFactory,
-	GatewayProviderRegistration,
+	GatewayProviderContext,
+	GatewayResolvedProviderConfig,
 	GatewayStreamRequest,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
+import { estimateRequestInputTokens } from "@bedrock-coder/shared";
 import { nanoid } from "nanoid";
+import { BEDROCK_DEFAULT_MODEL_ID } from "../catalog/bedrock";
+import { createBedrockProvider } from "./ai-sdk";
+import { toAsyncIterable } from "./async";
+import { isPositiveFiniteNumber } from "./utils";
 import type {
-	ModelInfo,
-	ProviderClient,
-	ProviderProtocol,
-} from "../catalog/types";
-import {
-	createAnthropicProvider,
-	createBedrockProvider,
-	createClaudeCodeProvider,
-	createDifyProvider,
-	createGoogleProvider,
-	createMistralProvider,
-	createOllamaProvider,
-	createOpenAICodexProvider,
-	createOpenAICompatibleProvider,
-	createOpenAIProvider,
-	createOpenCodeProvider,
-	createSapAiCoreProvider,
-	createVertexProvider,
-} from "./ai-sdk";
-import { BUILTIN_PROVIDER_REGISTRATIONS } from "./builtins-runtime";
-import { createGateway } from "./gateway";
-import {
-	getProviderCollection,
-	getProviderCollectionSync,
-} from "./model-registry";
-import {
-	type ApiHandler,
-	type ApiStream,
-	type ApiStreamChunk,
-	type HandlerModelInfo,
-	type Message,
-	normalizeProviderId,
-	type ProviderConfig,
-	resolveRoutingProviderId,
-	type ToolDefinition,
+	ApiHandler,
+	ApiStream,
+	ApiStreamChunk,
+	HandlerModelInfo,
+	Message,
+	ProviderConfig,
+	ToolDefinition,
 } from "./types";
 
-const BUILTIN_PROVIDER_MAP = new Map(
-	BUILTIN_PROVIDER_REGISTRATIONS.map((registration) => [
-		registration.manifest.id,
-		registration,
-	]),
-);
-
-function toGatewayCapabilities(
-	capabilities: readonly string[] | undefined,
-): GatewayModelDefinition["capabilities"] {
-	if (!capabilities?.length) {
-		return undefined;
-	}
-
-	const mapped = new Set<
-		NonNullable<GatewayModelDefinition["capabilities"]>[number]
-	>();
-	for (const capability of capabilities) {
-		switch (capability) {
-			case "tools":
-			case "reasoning":
-			case "prompt-cache":
-			case "images":
-			case "audio":
-				mapped.add(capability);
-				break;
-			case "files":
-			case "streaming":
-			case "temperature":
-			case "reasoning-effort":
-			case "computer-use":
-			case "global-endpoint":
-				mapped.add("text");
-				break;
-			case "structured_output":
-				mapped.add("structured-output");
-				break;
-			default:
-				mapped.add("text");
-		}
-	}
-
-	mapped.add("text");
-	return [...mapped];
-}
-
-function toGatewayModelDefinition(
-	providerId: string,
-	model: ModelInfo,
-): GatewayModelDefinition {
-	return {
-		id: model.id,
-		name: model.name ?? model.id,
-		description: model.description,
-		providerId,
-		contextWindow: model.contextWindow,
-		maxInputTokens: model.maxInputTokens,
-		maxOutputTokens: model.maxTokens,
-		capabilities: toGatewayCapabilities(model.capabilities),
-		metadata: {
-			family: model.family,
-			pricing: model.pricing,
-			status: model.status,
-			releaseDate: model.releaseDate,
-		},
-	};
-}
-
-function resolveFactory(
-	providerId: string,
-	transport?: {
-		client?: ProviderClient;
-		protocol?: ProviderProtocol;
-	},
-): GatewayProviderFactory {
-	if (
-		transport?.client === "openai" ||
-		transport?.protocol === "openai-responses"
-	) {
-		return createOpenAIProvider;
-	}
-	switch (transport?.client) {
-		case "anthropic":
-			return createAnthropicProvider;
-		case "gemini":
-			return createGoogleProvider;
-		case "vertex":
-			return createVertexProvider;
-		case "bedrock":
-			return createBedrockProvider;
-		case "openai-compatible":
-			return createOpenAICompatibleProvider;
-	}
-
-	const normalized = normalizeProviderId(providerId);
-	switch (normalized) {
-		case "openai-codex":
-		case "openai-native":
-			return createOpenAIProvider;
-		case "anthropic":
-		case "minimax":
-			return createAnthropicProvider;
-		case "gemini":
-			return createGoogleProvider;
-		case "vertex":
-			return createVertexProvider;
-		case "bedrock":
-			return createBedrockProvider;
-		case "mistral":
-			return createMistralProvider;
-		case "claude-code":
-			return createClaudeCodeProvider;
-		case "openai-codex-cli":
-			return createOpenAICodexProvider;
-		case "opencode":
-			return createOpenCodeProvider;
-		case "dify":
-			return createDifyProvider;
-		case "ollama":
-			return createOllamaProvider;
-		case "sapaicore":
-			return createSapAiCoreProvider;
-		default:
-			return createOpenAICompatibleProvider;
-	}
-}
-
-async function resolveProviderRegistration(
-	config: ProviderConfig,
-): Promise<GatewayProviderRegistration | undefined> {
-	const providerId = normalizeProviderId(config.providerId);
-	const routedProviderId = normalizeProviderId(
-		resolveRoutingProviderId(config),
-	);
-	const builtin = BUILTIN_PROVIDER_MAP.get(providerId);
-	if (builtin && providerId === routedProviderId) {
-		return undefined;
-	}
-
-	const collection =
-		(await getProviderCollection(providerId)) ??
-		(providerId !== routedProviderId
-			? await getProviderCollection(routedProviderId)
-			: undefined);
-	if (!collection) {
-		const routedBuiltin = BUILTIN_PROVIDER_MAP.get(routedProviderId);
-		if (!routedBuiltin || providerId === routedProviderId) {
-			return undefined;
-		}
-		return {
-			manifest: {
-				...routedBuiltin.manifest,
-				id: providerId,
-				name: routedBuiltin.manifest.name,
-				models: routedBuiltin.manifest.models.map((model) => ({
-					...model,
-					providerId,
-				})),
-			},
-			defaults: routedBuiltin.defaults,
-			createProvider: routedBuiltin.createProvider,
-			loadProvider: routedBuiltin.loadProvider,
-		};
-	}
-
-	const routedBuiltin = BUILTIN_PROVIDER_MAP.get(routedProviderId);
-	return {
-		manifest: {
-			id: providerId,
-			name: collection.provider.name,
-			description: collection.provider.description,
-			defaultModelId: collection.provider.defaultModelId,
-			models: Object.values(collection.models).map((model) =>
-				toGatewayModelDefinition(providerId, model),
-			),
-			api: collection.provider.baseUrl,
-			apiKeyEnv: collection.provider.env,
-		},
-		defaults: {
-			...(routedBuiltin?.defaults ?? {}),
-			baseUrl: collection.provider.baseUrl ?? routedBuiltin?.defaults?.baseUrl,
-			apiKeyEnv: collection.provider.env ?? routedBuiltin?.defaults?.apiKeyEnv,
-		},
-		createProvider:
-			routedBuiltin?.createProvider ??
-			resolveFactory(routedProviderId, {
-				client: config.clientType ?? collection.provider.client,
-				protocol: collection.provider.protocol,
-			}),
-		loadProvider: routedBuiltin?.loadProvider,
-	};
-}
-
-function resolveProviderRegistrationSync(
-	config: ProviderConfig,
-): GatewayProviderRegistration | undefined {
-	const providerId = normalizeProviderId(config.providerId);
-	const routedProviderId = normalizeProviderId(
-		resolveRoutingProviderId(config),
-	);
-	const builtin = BUILTIN_PROVIDER_MAP.get(providerId);
-	if (builtin && providerId === routedProviderId) {
-		return undefined;
-	}
-
-	const collection =
-		getProviderCollectionSync(providerId) ??
-		(providerId !== routedProviderId
-			? getProviderCollectionSync(routedProviderId)
-			: undefined);
-	if (!collection) {
-		const routedBuiltin = BUILTIN_PROVIDER_MAP.get(routedProviderId);
-		if (!routedBuiltin || providerId === routedProviderId) {
-			return undefined;
-		}
-		return {
-			manifest: {
-				...routedBuiltin.manifest,
-				id: providerId,
-				models: routedBuiltin.manifest.models.map((model) => ({
-					...model,
-					providerId,
-				})),
-			},
-			defaults: routedBuiltin.defaults,
-			createProvider: routedBuiltin.createProvider,
-			loadProvider: routedBuiltin.loadProvider,
-		};
-	}
-
-	const routedBuiltin = BUILTIN_PROVIDER_MAP.get(routedProviderId);
-	return {
-		manifest: {
-			id: providerId,
-			name: collection.provider.name,
-			description: collection.provider.description,
-			defaultModelId: collection.provider.defaultModelId,
-			models: Object.values(collection.models).map((model) =>
-				toGatewayModelDefinition(providerId, model),
-			),
-			api: collection.provider.baseUrl,
-			apiKeyEnv: collection.provider.env,
-		},
-		defaults: {
-			...(routedBuiltin?.defaults ?? {}),
-			baseUrl: collection.provider.baseUrl ?? routedBuiltin?.defaults?.baseUrl,
-			apiKeyEnv: collection.provider.env ?? routedBuiltin?.defaults?.apiKeyEnv,
-		},
-		createProvider:
-			routedBuiltin?.createProvider ??
-			resolveFactory(routedProviderId, {
-				client: config.clientType ?? collection.provider.client,
-				protocol: collection.provider.protocol,
-			}),
-		loadProvider: routedBuiltin?.loadProvider,
-	};
-}
-
-export function toGatewayRequestMessages(
+function toGatewayRequestMessages(
 	messages: Message[],
 ): GatewayStreamRequest["messages"] {
 	const toolNames = new Map<string, string>();
-
 	for (const message of messages) {
-		if (!Array.isArray(message.content)) {
-			continue;
-		}
+		if (!Array.isArray(message.content)) continue;
 		for (const part of message.content) {
 			if (part.type === "tool_use") {
 				toolNames.set(part.id, part.name);
-				if (part.call_id) {
-					toolNames.set(part.call_id, part.name);
-				}
+				if (part.call_id) toolNames.set(part.call_id, part.name);
 			}
 		}
 	}
 
-	return messages.map((message) => {
-		const content =
+	return messages.map((message) => ({
+		id: nanoid(),
+		role: message.role,
+		createdAt: Date.now(),
+		content:
 			typeof message.content === "string"
 				? [{ type: "text", text: message.content }]
 				: message.content.flatMap((part): Array<Record<string, unknown>> => {
 						switch (part.type) {
 							case "text":
-								return [{ type: "text", text: part.text }];
+								return [{ type: "text" as const, text: part.text }];
 							case "thinking":
-								return [
-									{
-										type: "reasoning" as const,
-										text: part.thinking,
-										metadata:
-											part.signature || part.call_id
-												? {
-														signature: part.signature,
-														callId: part.call_id,
-														details: part.details,
-													}
-												: undefined,
-									},
-								];
+								return [{
+									type: "reasoning" as const,
+									text: part.thinking,
+									metadata: part.signature
+										? { signature: part.signature, details: part.details }
+										: undefined,
+								}];
 							case "tool_use":
-								return [
-									{
-										type: "tool-call" as const,
-										toolCallId: part.call_id ?? part.id,
-										toolName: part.name,
-										input: part.input,
-										metadata: part.signature
-											? { thoughtSignature: part.signature }
-											: undefined,
-									},
-								];
+								return [{
+									type: "tool-call" as const,
+									toolCallId: part.call_id ?? part.id,
+									toolName: part.name,
+									input: part.input,
+									metadata: part.signature
+										? { thoughtSignature: part.signature }
+										: undefined,
+								}];
 							case "tool_result":
-								// Pass the raw tool-result content through unchanged.
-								// `formatMessagesForAiSdk` -> `toAiSdkToolResultOutput`
-								// downstream walks any structured `output` (including the
-								// `[{query, result, success}]` `ToolOperationResult` shape
-								// produced by `read_files`) and pulls nested image blocks
-								// out as `image-data` content parts. We don't need (and
-								// must not) detach images into sibling user messages here:
-								// that produces a malformed message stream where image
-								// parts are not attached to the originating tool call.
-								return [
-									{
-										type: "tool-result" as const,
-										toolCallId: part.tool_use_id,
-										toolName: toolNames.get(part.tool_use_id) ?? "tool",
-										output: part.content,
-										isError: part.is_error ?? false,
-									},
-								];
+								return [{
+									type: "tool-result" as const,
+									toolCallId: part.tool_use_id,
+									toolName: toolNames.get(part.tool_use_id) ?? "tool",
+									output: part.content,
+									isError: part.is_error ?? false,
+								}];
 							case "image":
-								return [
-									{
-										type: "image" as const,
-										image: `data:${part.mediaType};base64,${part.data}`,
-										mediaType: part.mediaType,
-									},
-								];
+								return [{
+									type: "image" as const,
+									image: `data:${part.mediaType};base64,${part.data}`,
+									mediaType: part.mediaType,
+								}];
 							case "file":
 								return [{ type: "text" as const, text: part.content }];
-							case "redacted_thinking":
-								return [];
 							default:
 								return [];
 						}
-					});
-
-		return {
-			id: nanoid(),
-			role: message.role,
-			content,
-			createdAt: Date.now(),
-		} as unknown as GatewayStreamRequest["messages"][number];
-	});
+					}),
+	})) as unknown as GatewayStreamRequest["messages"];
 }
 
 function toGatewayTools(
@@ -411,7 +100,7 @@ function toGatewayTools(
 	}));
 }
 
-function buildGatewayRequest(
+function buildRequest(
 	config: ProviderConfig,
 	systemPrompt: string,
 	messages: Message[],
@@ -419,12 +108,13 @@ function buildGatewayRequest(
 	signal?: AbortSignal,
 ): GatewayStreamRequest {
 	return {
-		providerId: normalizeProviderId(config.providerId),
+		providerId: "bedrock",
 		modelId: config.modelId,
 		systemPrompt,
 		messages: toGatewayRequestMessages(messages),
 		tools: toGatewayTools(tools),
 		maxTokens: config.maxOutputTokens,
+		temperature: config.temperature,
 		reasoning:
 			config.thinking !== undefined ||
 			config.reasoningEffort ||
@@ -434,11 +124,7 @@ function buildGatewayRequest(
 						effort:
 							config.reasoningEffort === "xhigh"
 								? "high"
-								: config.reasoningEffort === "low" ||
-										config.reasoningEffort === "medium" ||
-										config.reasoningEffort === "high"
-									? config.reasoningEffort
-									: undefined,
+								: config.reasoningEffort,
 						budgetTokens: config.thinkingBudgetTokens,
 					}
 				: undefined,
@@ -446,108 +132,188 @@ function buildGatewayRequest(
 	};
 }
 
-function buildGatewayModels(
-	providerId: string,
+function toGatewayModelDefinition(
+	id: string,
 	config: ProviderConfig,
-): Omit<GatewayModelDefinition, "providerId">[] | undefined {
-	const definitions = new Map<
-		string,
-		Omit<GatewayModelDefinition, "providerId">
-	>();
-	for (const model of Object.values(config.knownModels ?? {})) {
-		const { providerId: _providerId, ...definition } = toGatewayModelDefinition(
-			providerId,
-			model,
-		);
-		definitions.set(definition.id, definition);
-	}
-
-	// Caller-configured limits are authoritative for the selected model —
-	// project them onto its gateway definition so the resolved model carries
-	// the right limits (e.g. Ollama's num_ctx derives from the resolved
-	// model's context window). `maxInputTokens` is where
-	// `ProviderSettings.contextWindow` lands via `toProviderConfig`; an
-	// explicit `modelInfo` override wins over the generic limit.
-	const configuredContextWindow =
-		typeof config.maxInputTokens === "number" &&
-		Number.isFinite(config.maxInputTokens) &&
-		config.maxInputTokens > 0
-			? Math.floor(config.maxInputTokens)
-			: undefined;
-	const modelInfo =
-		config.modelInfo && config.modelInfo.id === config.modelId
-			? config.modelInfo
-			: undefined;
-	if (config.modelId && (configuredContextWindow !== undefined || modelInfo)) {
-		const base = definitions.get(config.modelId) ?? {
-			id: config.modelId,
-			name: config.modelId,
-		};
-		const { providerId: _providerId, ...modelInfoDefinition } = modelInfo
-			? toGatewayModelDefinition(providerId, modelInfo)
-			: { providerId };
-		const definedOverrides = Object.fromEntries(
-			Object.entries(modelInfoDefinition).filter(([key, value]) => {
-				if (value === undefined) {
-					return false;
-				}
-				// toGatewayModelDefinition always emits a metadata object; drop
-				// it when it carries no actual values so it can't clobber the
-				// base definition's real metadata.
-				if (key === "metadata") {
-					return Object.values(value as Record<string, unknown>).some(
-						(entry) => entry !== undefined,
-					);
-				}
-				return true;
-			}),
-		);
-		definitions.set(config.modelId, {
-			...base,
-			...(configuredContextWindow !== undefined
-				? {
-						contextWindow: configuredContextWindow,
-						maxInputTokens: configuredContextWindow,
-					}
-				: {}),
-			...definedOverrides,
-		} as Omit<GatewayModelDefinition, "providerId">);
-	}
-
-	return definitions.size > 0 ? [...definitions.values()] : undefined;
+): Omit<GatewayModelDefinition, "providerId"> {
+	const info = config.modelInfo ?? config.knownModels?.[id];
+	return {
+		id,
+		name: info?.name ?? id,
+		description: info?.description,
+		contextWindow: info?.contextWindow,
+		maxInputTokens: info?.maxInputTokens ?? config.maxInputTokens,
+		maxOutputTokens: info?.maxTokens,
+		capabilities: info?.capabilities?.flatMap((capability) => {
+			switch (capability) {
+				case "tools":
+				case "reasoning":
+				case "prompt-cache":
+				case "images":
+					return [capability];
+				case "structured_output":
+					return ["structured-output" as const];
+				default:
+					return ["text" as const];
+			}
+		}),
+		metadata: { family: info?.family, pricing: info?.pricing },
+	};
 }
 
-function buildGatewayConfig(config: ProviderConfig) {
-	const providerId = normalizeProviderId(config.providerId);
+const DEFAULT_BEDROCK_MAX_OUTPUT_TOKENS = 32_000;
+const BEDROCK_OUTPUT_RESERVE_TOKENS = 1_024;
+
+function resolveBedrockRequestMaxTokens(input: {
+	requestedMaxTokens?: number;
+	model: Pick<GatewayModelDefinition, "contextWindow" | "maxOutputTokens">;
+	estimatedInputTokens: number;
+	reasoningBudgetTokens?: number;
+}): number | undefined {
+	const caps: number[] = [];
+	if (isPositiveFiniteNumber(input.requestedMaxTokens)) {
+		caps.push(Math.floor(input.requestedMaxTokens));
+	} else {
+		const reasoningFloor = isPositiveFiniteNumber(input.reasoningBudgetTokens)
+			? Math.floor(input.reasoningBudgetTokens) +
+				BEDROCK_OUTPUT_RESERVE_TOKENS
+			: 0;
+		if (
+			isPositiveFiniteNumber(input.model.maxOutputTokens) ||
+			isPositiveFiniteNumber(input.model.contextWindow)
+		) {
+			caps.push(
+				Math.max(DEFAULT_BEDROCK_MAX_OUTPUT_TOKENS, reasoningFloor),
+			);
+		}
+	}
+	if (isPositiveFiniteNumber(input.model.maxOutputTokens)) {
+		caps.push(Math.floor(input.model.maxOutputTokens));
+	}
+	if (isPositiveFiniteNumber(input.model.contextWindow)) {
+		const remainingContext =
+			input.model.contextWindow -
+			input.estimatedInputTokens -
+			BEDROCK_OUTPUT_RESERVE_TOKENS;
+		if (remainingContext <= 0) return undefined;
+		caps.push(Math.floor(remainingContext));
+	}
+	return caps.length === 0
+		? undefined
+		: Math.max(1, Math.floor(Math.min(...caps)));
+}
+
+function toBedrockRequest(
+	config: ProviderConfig,
+	request: AgentModelRequest,
+): GatewayStreamRequest {
+	const requestedReasoning = request.options?.reasoning as
+		| {
+				enabled?: boolean;
+				effort?: "low" | "medium" | "high";
+				budgetTokens?: number;
+		  }
+		| undefined;
+	const legacyEffort =
+		request.options?.reasoningEffort === "low" ||
+		request.options?.reasoningEffort === "medium" ||
+		request.options?.reasoningEffort === "high"
+			? request.options.reasoningEffort
+			: undefined;
+	const legacyReasoning:
+		| {
+				enabled?: boolean;
+				effort?: "low" | "medium" | "high";
+				budgetTokens?: number;
+		  }
+		| undefined =
+		typeof request.options?.thinking === "boolean" ||
+		legacyEffort !== undefined ||
+		typeof request.options?.thinkingBudgetTokens === "number"
+			? {
+					enabled:
+						typeof request.options?.thinking === "boolean"
+							? request.options.thinking
+							: undefined,
+					effort: legacyEffort,
+					budgetTokens:
+						typeof request.options?.thinkingBudgetTokens === "number"
+							? request.options.thinkingBudgetTokens
+							: undefined,
+				}
+			: undefined;
 	return {
-		providerId,
-		apiKey: config.apiKey ?? config.accessToken,
-		baseUrl: config.baseUrl,
-		headers: config.headers,
-		timeoutMs: config.timeoutMs,
-		fetch: config.fetch,
-		defaultModelId: config.modelId,
-		models: buildGatewayModels(providerId, config),
+		providerId: "bedrock",
+		modelId: config.modelId,
+		systemPrompt: request.systemPrompt,
+		messages: request.messages as readonly AgentMessage[],
+		tools: request.tools,
+		temperature:
+			(request.options?.temperature as number | undefined) ??
+			config.temperature,
+		maxTokens:
+			(request.options?.maxTokens as number | undefined) ??
+			config.maxOutputTokens,
+		reasoning: requestedReasoning ?? legacyReasoning,
+		metadata: request.options?.metadata as
+			| Record<string, unknown>
+			| undefined,
+		signal: request.signal,
+	};
+}
+
+function createModel(config: ProviderConfig): AgentModel {
+	const model = {
+		...toGatewayModelDefinition(config.modelId, config),
+		providerId: "bedrock",
+	};
+	const provider = {
+		id: "bedrock",
+		name: "AWS Bedrock",
+		description: "Amazon Bedrock managed foundation models",
+		defaultModelId: config.modelId || BEDROCK_DEFAULT_MODEL_ID,
+		models: [model],
+		capabilities: ["tools", "reasoning", "prompt-cache", "streaming"] as const,
+		env: ["node"] as const,
+	};
+	const providerConfig: GatewayResolvedProviderConfig = {
+		providerId: "bedrock",
 		options: {
-			region: config.region ?? config.gcp?.region,
-			project: config.gcp?.projectId,
-			projectId: config.gcp?.projectId,
-			location: config.region ?? config.gcp?.region,
-			accessKeyId: config.aws?.accessKey,
-			secretAccessKey: config.aws?.secretKey,
-			sessionToken: config.aws?.sessionToken,
-			authentication: config.aws?.authentication,
-			profile: config.aws?.profile,
-			endpoint: config.aws?.endpoint,
-			customModelBaseId: config.aws?.customModelBaseId,
-			apiVersion: config.azure?.apiVersion,
-			useIdentity: config.azure?.useIdentity,
-			mode: config.oca?.mode,
-			usePromptCache: config.aws?.usePromptCache ?? config.oca?.usePromptCache,
-			...config.codex,
-			...config.claudeCode,
-			...config.opencode,
-			...config.sap,
+			connection: config.connection,
+			workspaceRoot: config.workspaceRoot,
+		},
+	};
+	const context: GatewayProviderContext = {
+		provider,
+		model,
+		config: providerConfig,
+		logger: config.logger ?? config.extensionContext?.logger,
+	};
+	return {
+		async stream(request: AgentModelRequest) {
+			const bedrockRequest = toBedrockRequest(config, request);
+			const maxTokens = resolveBedrockRequestMaxTokens({
+				requestedMaxTokens: bedrockRequest.maxTokens,
+				model,
+				estimatedInputTokens: estimateRequestInputTokens(bedrockRequest),
+				reasoningBudgetTokens: bedrockRequest.reasoning?.budgetTokens,
+			});
+			const bedrock = await createBedrockProvider(providerConfig);
+			return toAsyncIterable(
+				await bedrock.stream(
+					{
+						...bedrockRequest,
+						maxTokens,
+						defaultedMaxTokens:
+							maxTokens !== undefined &&
+							!isPositiveFiniteNumber(bedrockRequest.maxTokens),
+					},
+					{
+						...context,
+						signal: request.signal,
+					},
+				),
+			);
 		},
 	};
 }
@@ -563,37 +329,29 @@ function toApiStreamChunk(id: string, event: AgentModelEvent): ApiStreamChunk {
 				id,
 				reasoning: event.text,
 				signature:
-					typeof metadata?.thoughtSignature === "string"
-						? metadata.thoughtSignature
-						: typeof metadata?.signature === "string"
-							? metadata.signature
-							: undefined,
+					typeof metadata?.signature === "string"
+						? metadata.signature
+						: undefined,
 				details: metadata?.details,
 			};
 		}
-		case "tool-call-delta": {
-			const metadata = event.metadata as Record<string, unknown> | undefined;
-			const args =
-				typeof event.inputText === "string" || event.input === undefined
-					? event.inputText
-					: (event.input as Record<string, unknown>);
+		case "tool-call-delta":
 			return {
 				type: "tool_calls",
 				id,
-				signature:
-					typeof metadata?.thoughtSignature === "string"
-						? metadata.thoughtSignature
-						: undefined,
 				tool_call: {
 					call_id: event.toolCallId,
 					function: {
 						id: event.toolCallId,
 						name: event.toolName,
-						arguments: args,
+						arguments:
+							typeof event.inputText === "string" ||
+							event.input === undefined
+								? event.inputText
+								: (event.input as Record<string, unknown>),
 					},
 				},
 			};
-		}
 		case "usage":
 			return {
 				type: "usage",
@@ -617,18 +375,7 @@ function toApiStreamChunk(id: string, event: AgentModelEvent): ApiStreamChunk {
 	}
 }
 
-function resolveModelInfo(config: ProviderConfig): ModelInfo {
-	return (
-		config.modelInfo ??
-		(config.modelId ? config.knownModels?.[config.modelId] : undefined) ?? {
-			id: config.modelId,
-			name: config.modelId,
-			capabilities: ["streaming"],
-		}
-	);
-}
-
-class GatewayApiHandler implements ApiHandler {
+class BedrockApiHandler implements ApiHandler {
 	private abortSignal: AbortSignal | undefined;
 
 	constructor(private readonly config: ProviderConfig) {
@@ -636,13 +383,7 @@ class GatewayApiHandler implements ApiHandler {
 	}
 
 	getMessages(systemPrompt: string, messages: Message[]): unknown {
-		return buildGatewayRequest(
-			this.config,
-			systemPrompt,
-			messages,
-			undefined,
-			this.abortSignal,
-		);
+		return buildRequest(this.config, systemPrompt, messages, undefined, this.abortSignal);
 	}
 
 	createMessage(
@@ -650,27 +391,27 @@ class GatewayApiHandler implements ApiHandler {
 		messages: Message[],
 		tools?: ToolDefinition[],
 	): ApiStream {
-		const gateway = createGateway({
-			providerConfigs: [buildGatewayConfig(this.config)],
-			fetch: this.config.fetch,
-			logger: this.config.logger ?? this.config.extensionContext?.logger,
-			telemetry: this.config.extensionContext?.telemetry,
-		});
-		const registration = resolveProviderRegistrationSync(this.config);
-		if (registration) {
-			gateway.registerProvider(registration);
-		}
-
-		const request = buildGatewayRequest(
+		const model = createModel(this.config);
+		const request = buildRequest(
 			this.config,
 			systemPrompt,
 			messages,
 			tools,
 			this.abortSignal,
 		);
-		const id = `gw_${nanoid(10)}`;
+		const id = `bedrock_${nanoid(10)}`;
 		const stream = (async function* () {
-			for await (const event of await gateway.stream(request)) {
+			for await (const event of await model.stream({
+				systemPrompt: request.systemPrompt,
+				messages: request.messages,
+				tools: request.tools ?? [],
+				options: {
+					maxTokens: request.maxTokens,
+					temperature: request.temperature,
+					reasoning: request.reasoning,
+				},
+				signal: request.signal,
+			})) {
 				yield toApiStreamChunk(id, event);
 			}
 		})() as ApiStream;
@@ -679,68 +420,26 @@ class GatewayApiHandler implements ApiHandler {
 	}
 
 	getModel(): HandlerModelInfo {
-		return {
-			id: this.config.modelId,
-			info: resolveModelInfo(this.config),
-		};
+		const info = this.config.modelInfo ??
+			this.config.knownModels?.[this.config.modelId] ?? {
+				id: this.config.modelId,
+				name: this.config.modelId,
+				capabilities: ["streaming" as const],
+			};
+		return { id: this.config.modelId, info };
 	}
 
-	abort(): void {
-		// Requests are cancelled via the configured AbortSignal.
-	}
+	abort(): void {}
 
 	setAbortSignal(signal: AbortSignal | undefined): void {
 		this.abortSignal = signal;
 	}
 }
 
-export function createGatewayApiHandler(config: ProviderConfig): ApiHandler {
-	return new GatewayApiHandler(config);
+export function createBedrockClient(config: ProviderConfig): ApiHandler {
+	return new BedrockApiHandler(config);
 }
 
-export async function createGatewayApiHandlerAsync(
-	config: ProviderConfig,
-): Promise<ApiHandler> {
-	const gateway = createGateway({
-		providerConfigs: [buildGatewayConfig(config)],
-		fetch: config.fetch,
-		logger: config.logger ?? config.extensionContext?.logger,
-		telemetry: config.extensionContext?.telemetry,
-	});
-	const registration = await resolveProviderRegistration(config);
-	if (registration) {
-		gateway.registerProvider(registration);
-	}
-	return new (class extends GatewayApiHandler {
-		override createMessage(
-			systemPrompt: string,
-			messages: Message[],
-			tools?: ToolDefinition[],
-		): ApiStream {
-			const request = buildGatewayRequest(
-				config,
-				systemPrompt,
-				messages,
-				tools,
-				config.abortSignal,
-			);
-			const id = `gw_${nanoid(10)}`;
-			const stream = (async function* () {
-				for await (const event of await gateway.stream(request)) {
-					yield toApiStreamChunk(id, event);
-				}
-			})() as ApiStream;
-			stream.id = id;
-			return stream;
-		}
-	})(config);
+export function createBedrockAgentModel(config: ProviderConfig): AgentModel {
+	return createModel(config);
 }
-
-/**
- * Internal test hook. Not part of the public API; production callers go
- * through `createGatewayApiHandler(Async)`.
- */
-export const _testing = {
-	buildGatewayConfig,
-	buildGatewayModels,
-};

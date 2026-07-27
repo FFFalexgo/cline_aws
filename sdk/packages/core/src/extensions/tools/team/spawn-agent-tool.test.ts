@@ -1,4 +1,4 @@
-import type { AgentConfig } from "@cline/shared";
+import type { AgentConfig } from "@bedrock-coder/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDelegatedAgentConfigProvider } from "./delegated-agent";
 
@@ -62,7 +62,7 @@ describe("createSpawnAgentTool", () => {
 
 		const tool = createSpawnAgentTool({
 			configProvider: createDelegatedAgentConfigProvider({
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "mock-model",
 				extensions,
 			}),
@@ -132,7 +132,7 @@ describe("createSpawnAgentTool", () => {
 
 		const tool = createSpawnAgentTool({
 			configProvider: createDelegatedAgentConfigProvider({
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "mock-model",
 				extensions,
 			}),
@@ -165,7 +165,7 @@ describe("createSpawnAgentTool", () => {
 
 		const tool = createSpawnAgentTool({
 			configProvider: createDelegatedAgentConfigProvider({
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "mock-model",
 			}),
 			subAgentTools: [],
@@ -206,7 +206,7 @@ describe("createSpawnAgentTool", () => {
 
 		const tool = createSpawnAgentTool({
 			configProvider: createDelegatedAgentConfigProvider({
-				providerId: "anthropic",
+				providerId: "bedrock",
 				modelId: "mock-model",
 			}),
 			subAgentTools: [],
@@ -231,7 +231,7 @@ describe("createSpawnAgentTool", () => {
 		);
 	});
 
-	it("appends workspace metadata for cline sub-agents when missing", async () => {
+	it("appends workspace metadata for bedrockCoder sub-agents when missing", async () => {
 		const { createSpawnAgentTool } = await import("./spawn-agent-tool.js");
 		runMock.mockResolvedValue({
 			text: "ok",
@@ -251,7 +251,7 @@ describe("createSpawnAgentTool", () => {
 
 		const tool = createSpawnAgentTool({
 			configProvider: createDelegatedAgentConfigProvider({
-				providerId: "cline",
+				providerId: "bedrock",
 				modelId: "anthropic/claude-sonnet-4.6",
 				cwd: "/repo/demo",
 				workspaceMetadata,
@@ -278,7 +278,7 @@ describe("createSpawnAgentTool", () => {
 		);
 	});
 
-	it("does not duplicate workspace metadata for cline sub-agents", async () => {
+	it("does not duplicate workspace metadata for bedrockCoder sub-agents", async () => {
 		const { createSpawnAgentTool } = await import("./spawn-agent-tool.js");
 		runMock.mockResolvedValue({
 			text: "ok",
@@ -300,7 +300,7 @@ describe("createSpawnAgentTool", () => {
 
 		const tool = createSpawnAgentTool({
 			configProvider: createDelegatedAgentConfigProvider({
-				providerId: "cline",
+				providerId: "bedrock",
 				modelId: "anthropic/claude-sonnet-4.6",
 				cwd: "/repo/demo",
 				workspaceMetadata: "# Workspace Configuration\n{}",
@@ -337,9 +337,13 @@ describe("createSpawnAgentTool", () => {
 		});
 
 		const configProvider = createDelegatedAgentConfigProvider({
-			providerId: "cline",
+			providerId: "bedrock",
 			modelId: "stale-model",
-			apiKey: "oauth-access-old",
+			providerConfig: {
+				providerId: "bedrock",
+				modelId: "stale-model",
+				connection: { region: "us-east-1" },
+			},
 			temperature: 0.3,
 		});
 		const updateConnectionDefaults = vi.spyOn(
@@ -347,8 +351,12 @@ describe("createSpawnAgentTool", () => {
 			"updateConnectionDefaults",
 		);
 		configProvider.updateConnectionDefaults({
-			apiKey: "oauth-access-new",
 			modelId: "updated-model",
+			providerConfig: {
+				providerId: "bedrock",
+				modelId: "updated-model",
+				connection: { region: "ca-central-1" },
+			},
 		});
 
 		const tool = createSpawnAgentTool({
@@ -371,8 +379,10 @@ describe("createSpawnAgentTool", () => {
 		expect(updateConnectionDefaults).toHaveBeenCalledTimes(1);
 		expect(agentConstructorSpy).toHaveBeenCalledWith(
 			expect.objectContaining({
-				apiKey: "oauth-access-new",
 				modelId: "updated-model",
+				providerConfig: expect.objectContaining({
+					connection: { region: "ca-central-1" },
+				}),
 				temperature: 0.3,
 			}),
 		);

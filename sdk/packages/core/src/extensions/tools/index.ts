@@ -5,7 +5,7 @@
  */
 
 // Zod Utilities
-export { validateWithZod, zodToJsonSchema } from "@cline/shared";
+export { validateWithZod, zodToJsonSchema } from "@bedrock-coder/shared";
 // Constants
 export { ALL_DEFAULT_TOOL_NAMES, DefaultToolNames } from "./constants";
 // AgentTool Definitions
@@ -55,9 +55,7 @@ export {
 // Presets
 export {
 	createDefaultToolsWithPreset,
-	createToolPoliciesWithPreset,
 	resolveToolPresetName,
-	type ToolPolicyPresetName,
 	type ToolPresetName,
 	ToolPresets,
 } from "./presets";
@@ -122,7 +120,7 @@ export type {
 // Convenience: Create Tools with Built-in Executors
 // =============================================================================
 
-import { type AgentTool, getDefaultShell } from "@cline/shared";
+import { type AgentTool, getDefaultShell } from "@bedrock-coder/shared";
 import { createDefaultTools } from "./definitions";
 import {
 	createDefaultExecutors,
@@ -158,7 +156,7 @@ export interface CreateBuiltinToolsOptions
  *
  * @example
  * ```typescript
- * import { Agent, createBuiltinTools } from "@cline/core"
+ * import { Agent, createBuiltinTools } from "@bedrock-coder/core"
  *
  * const tools = createBuiltinTools({
  *   cwd: "/path/to/project",
@@ -170,7 +168,7 @@ export interface CreateBuiltinToolsOptions
  * })
  *
  * const agent = new Agent({
- *   providerId: "anthropic",
+ *   providerId: "bedrock",
  *   modelId: "claude-sonnet-4-20250514",
  *   systemPrompt: "You are a coding assistant.",
  *   tools,

@@ -1,32 +1,32 @@
-import { join } from "node:path";
-import { resolveTeamDataDir } from "@cline/shared/storage";
+import { join, resolve } from "node:path";
+import { resolveTeamDataDir } from "@bedrock-coder/shared/storage";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDelegatedAgentConfigProvider } from "./delegated-agent";
 import { AgentTeamsRuntime } from "./multi-agent";
 import { createAgentTeamsTools } from "./team-tools";
 
 type EnvSnapshot = {
-	CLINE_DATA_DIR: string | undefined;
-	CLINE_TEAM_DATA_DIR: string | undefined;
+	BEDROCK_CODER_DATA_DIR: string | undefined;
+	BEDROCK_CODER_TEAM_DATA_DIR: string | undefined;
 };
 
 function captureEnv(): EnvSnapshot {
 	return {
-		CLINE_DATA_DIR: process.env.CLINE_DATA_DIR,
-		CLINE_TEAM_DATA_DIR: process.env.CLINE_TEAM_DATA_DIR,
+		BEDROCK_CODER_DATA_DIR: process.env.BEDROCK_CODER_DATA_DIR,
+		BEDROCK_CODER_TEAM_DATA_DIR: process.env.BEDROCK_CODER_TEAM_DATA_DIR,
 	};
 }
 
 function restoreEnv(snapshot: EnvSnapshot): void {
-	process.env.CLINE_DATA_DIR = snapshot.CLINE_DATA_DIR;
-	process.env.CLINE_TEAM_DATA_DIR = snapshot.CLINE_TEAM_DATA_DIR;
+	process.env.BEDROCK_CODER_DATA_DIR = snapshot.BEDROCK_CODER_DATA_DIR;
+	process.env.BEDROCK_CODER_TEAM_DATA_DIR = snapshot.BEDROCK_CODER_TEAM_DATA_DIR;
 }
 
 function makeTeammateConfigProvider(
 	overrides?: Partial<Parameters<typeof createDelegatedAgentConfigProvider>[0]>,
 ) {
 	return createDelegatedAgentConfigProvider({
-		providerId: "anthropic",
+		providerId: "bedrock",
 		modelId: "claude-sonnet-4-5-20250929",
 		...overrides,
 	});
@@ -39,18 +39,18 @@ describe("resolveTeamDataDir", () => {
 		restoreEnv(snapshot);
 	});
 
-	it("uses CLINE_TEAM_DATA_DIR when set", () => {
+	it("uses BEDROCK_CODER_TEAM_DATA_DIR when set", () => {
 		snapshot = captureEnv();
-		process.env.CLINE_TEAM_DATA_DIR = "/tmp/team-dir";
-		process.env.CLINE_DATA_DIR = "/tmp/cline-data";
+		process.env.BEDROCK_CODER_TEAM_DATA_DIR = "/tmp/team-dir";
+		process.env.BEDROCK_CODER_DATA_DIR = "/tmp/bedrock-coder-data";
 		expect(resolveTeamDataDir()).toBe("/tmp/team-dir");
 	});
 
-	it("falls back to CLINE_DATA_DIR/teams", () => {
+	it("falls back to BEDROCK_CODER_DATA_DIR/teams", () => {
 		snapshot = captureEnv();
-		delete process.env.CLINE_TEAM_DATA_DIR;
-		process.env.CLINE_DATA_DIR = "/tmp/cline-data";
-		expect(resolveTeamDataDir()).toBe(join("/tmp/cline-data", "teams"));
+		delete process.env.BEDROCK_CODER_TEAM_DATA_DIR;
+		process.env.BEDROCK_CODER_DATA_DIR = "/tmp/bedrock-coder-data";
+		expect(resolveTeamDataDir()).toBe(join("/tmp/bedrock-coder-data", "teams"));
 	});
 });
 
@@ -240,7 +240,7 @@ describe("createAgentTeamsTools schema surface", () => {
 			),
 		).resolves.toMatchObject({
 			action: "create",
-			status: "pending",
+			status: "backlog",
 			taskId: expect.stringMatching(/^task_/),
 		});
 	});
@@ -275,7 +275,7 @@ describe("createAgentTeamsTools schema surface", () => {
 			),
 		).resolves.toMatchObject({
 			action: "create",
-			status: "pending",
+			status: "backlog",
 			taskId: expect.stringMatching(/^task_/),
 			ignoredFields: ["status", "summary"],
 			note: "Ignored fields for action=create: status, summary",
@@ -466,8 +466,58 @@ describe("createAgentTeamsTools schema surface", () => {
 });
 
 describe("createAgentTeamsTools runtime behavior", () => {
-	it("forwards teammateRuntime headers when spawning teammates", async () => {
+	it("binds teammate tools and prompt metadata to a recognized assigned worktree", async () => {
+		const repositoryRoot = resolve(process.cwd(), "../../..");
 		const spawnTeammate = vi.fn();
+		const createBaseTools = vi.fn(() => []);
+		const runtime = {
+			getMemberRole: vi.fn(() => "lead"),
+			isTeammateActive: vi.fn(() => false),
+			listTasks: vi.fn(() => [
+				{
+					id: "task_0001",
+					assignedAgentId: "investigator",
+					worktreePath: repositoryRoot,
+				},
+			]),
+			spawnTeammate,
+		} as unknown as AgentTeamsRuntime;
+		const tools = createAgentTeamsTools({
+			runtime,
+			requesterId: "lead",
+			teammateConfigProvider: makeTeammateConfigProvider({
+				cwd: repositoryRoot,
+			}),
+			createBaseTools,
+			includeManagementTools: false,
+		});
+
+		await tools[0]?.execute(
+			{
+				agentId: "investigator",
+				rolePrompt: "Inspect the assigned worktree",
+			},
+			{
+				agentId: "lead",
+				conversationId: "conv-1",
+				iteration: 1,
+			},
+		);
+
+		expect(createBaseTools).toHaveBeenCalledWith(repositoryRoot);
+		expect(spawnTeammate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				config: expect.objectContaining({
+					systemPrompt: expect.stringContaining("Workspace Configuration"),
+				}),
+			}),
+		);
+	});
+
+	it("forwards Bedrock connection settings when spawning teammates", async () => {
+		const spawnTeammate = vi.fn();
+		const requestToolApproval = vi.fn(async () => ({ approved: true }));
+		const toolPolicies = { "*": {} };
 		const runtime = {
 			getMemberRole: vi.fn(() => "lead"),
 			isTeammateActive: vi.fn(() => false),
@@ -478,12 +528,21 @@ describe("createAgentTeamsTools runtime behavior", () => {
 			runtime,
 			requesterId: "lead",
 			teammateConfigProvider: makeTeammateConfigProvider({
-				providerId: "cline",
+				providerId: "bedrock",
 				modelId: "anthropic/claude-sonnet-4.6",
-				headers: { Authorization: "Bearer token" },
+				providerConfig: {
+					providerId: "bedrock",
+					modelId: "anthropic/claude-sonnet-4.6",
+					connection: {
+						region: "ca-central-1",
+						profile: "engineering-sso",
+					},
+				},
 			}),
 			createBaseTools: () => [],
 			includeManagementTools: false,
+			toolPolicies,
+			requestToolApproval,
 		});
 		const spawnTool = tools.find((tool) => tool.name === "team_spawn_teammate");
 		expect(spawnTool).toBeDefined();
@@ -503,13 +562,20 @@ describe("createAgentTeamsTools runtime behavior", () => {
 		expect(spawnTeammate).toHaveBeenCalledWith(
 			expect.objectContaining({
 				config: expect.objectContaining({
-					headers: { Authorization: "Bearer token" },
+					providerConfig: expect.objectContaining({
+						connection: {
+							region: "ca-central-1",
+							profile: "engineering-sso",
+						},
+					}),
+					toolPolicies,
+					requestToolApproval,
 				}),
 			}),
 		);
 	});
 
-	it("injects workspace metadata into cline teammate system prompt", async () => {
+	it("injects workspace metadata into bedrockCoder teammate system prompt", async () => {
 		const spawnTeammate = vi.fn();
 		const runtime = {
 			getMemberRole: vi.fn(() => "lead"),
@@ -521,7 +587,7 @@ describe("createAgentTeamsTools runtime behavior", () => {
 			runtime,
 			requesterId: "lead",
 			teammateConfigProvider: makeTeammateConfigProvider({
-				providerId: "cline",
+				providerId: "bedrock",
 				modelId: "anthropic/claude-sonnet-4.6",
 				cwd: "/repo/app",
 			}),
@@ -977,7 +1043,7 @@ describe("createAgentTeamsTools runtime behavior", () => {
 					id: first.taskId,
 					createdAt: expect.any(String),
 					updatedAt: expect.any(String),
-					isReady: true,
+					isReady: false,
 					blockedBy: [],
 				}),
 				expect.objectContaining({

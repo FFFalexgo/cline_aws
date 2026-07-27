@@ -20,7 +20,7 @@ import type {
 	BasicLogMetadata,
 	ConsecutiveMistakeLimitContext,
 	ConsecutiveMistakeLimitDecision,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 
 /**
  * Legacy-agents-style leveled log function. The sdk-re `BasicLogger`
@@ -60,12 +60,6 @@ export interface MistakeTrackerOptions {
 	) =>
 		| Promise<ConsecutiveMistakeLimitDecision>
 		| ConsecutiveMistakeLimitDecision;
-	/**
-	 * Observability hook fired exactly once per limit hit, right before the
-	 * limit decision is resolved — regardless of whether `onLimitReached` is
-	 * configured or what it decides. Used for telemetry.
-	 */
-	readonly onLimitTelemetry?: (ctx: ConsecutiveMistakeLimitContext) => void;
 	readonly emit: (event: AgentEvent) => void;
 	readonly log: LeveledLog;
 	readonly agentId: string;
@@ -120,7 +114,6 @@ export class MistakeTracker {
 			reason: input.reason,
 			details: input.details,
 		};
-		this.options.onLimitTelemetry?.(limitContext);
 		const decision = await resolveConsecutiveMistakeDecision(
 			limitContext,
 			this.options.onLimitReached,

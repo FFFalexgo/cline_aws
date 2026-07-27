@@ -1,4 +1,4 @@
-import { buildClineSystemPrompt } from "@cline/shared";
+import { buildBedrockCoderSystemPrompt } from "@bedrock-coder/shared";
 import type { DelegatedAgentRuntimeConfig } from "./delegated-agent";
 
 export function buildTeammateSystemPrompt(
@@ -6,16 +6,11 @@ export function buildTeammateSystemPrompt(
 	config: DelegatedAgentRuntimeConfig,
 ): string {
 	const trimmedPrompt = prompt.trim();
-	if (config.providerId.toLowerCase() !== "cline") {
-		return trimmedPrompt;
-	}
-
-	return buildClineSystemPrompt({
-		ide: config.clineIdeName?.trim() || "Terminal",
+	return buildBedrockCoderSystemPrompt({
+		ide: config.bedrockCoderIdeName?.trim() || "Terminal",
 		workspaceRoot: config.cwd?.trim() || "/",
-		providerId: config.providerId,
 		rules: `# Team Teammate Role\n${trimmedPrompt}`,
-		platform: config.clinePlatform,
+		platform: config.bedrockCoderPlatform,
 		metadata: config.workspaceMetadata,
 	});
 }
@@ -26,16 +21,11 @@ export function buildSubAgentSystemPrompt(
 	config: DelegatedAgentRuntimeConfig,
 ): string {
 	const trimmedPrompt = prompt.trim();
-	if (config.providerId.toLowerCase() !== "cline") {
-		return trimmedPrompt;
-	}
-
-	return buildClineSystemPrompt({
-		ide: config.clineIdeName || "Terminal",
+	return buildBedrockCoderSystemPrompt({
+		ide: config.bedrockCoderIdeName || "Terminal",
 		workspaceRoot: config.cwd?.trim() || "/",
-		providerId: config.providerId,
 		overridePrompt: trimmedPrompt,
 		metadata: config.workspaceMetadata,
-		platform: config.clinePlatform,
+		platform: config.bedrockCoderPlatform,
 	});
 }

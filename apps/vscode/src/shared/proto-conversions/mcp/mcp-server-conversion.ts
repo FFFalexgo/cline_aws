@@ -1,12 +1,12 @@
 import {
+	McpServerStatus,
 	McpPrompt as ProtoMcpPrompt,
 	McpPromptArgument as ProtoMcpPromptArgument,
 	McpResource as ProtoMcpResource,
 	McpResourceTemplate as ProtoMcpResourceTemplate,
 	McpServer as ProtoMcpServer,
-	McpServerStatus,
 	McpTool as ProtoMcpTool,
-} from "@shared/proto/cline/mcp"
+} from "@shared/proto/bedrock_coder/mcp"
 import { McpOAuthAuthStatus, McpPrompt, McpPromptArgument, McpResource, McpResourceTemplate, McpServer, McpTool } from "../../mcp"
 
 // Helper to convert TS status to Proto enum
@@ -56,7 +56,6 @@ function convertTool(tool: McpTool): ProtoMcpTool {
 		name: tool.name,
 		description: tool.description,
 		inputSchema: inputSchemaString,
-		autoApprove: tool.autoApprove,
 	}
 }
 
@@ -155,7 +154,6 @@ function convertProtoTool(protoTool: ProtoMcpTool): McpTool {
 				? JSON.parse(protoTool.inputSchema)
 				: protoTool.inputSchema
 			: undefined,
-		autoApprove: protoTool.autoApprove,
 	}
 }
 

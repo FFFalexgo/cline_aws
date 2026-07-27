@@ -1,27 +1,16 @@
-import type { ConsecutiveMistakeLimitContext, ConsecutiveMistakeLimitDecision } from "@cline/shared"
-import type { ClineAskQuestion, ClineMessage, TurnPhase } from "@shared/ExtensionMessage"
-import type { ClineAskResponse } from "@shared/WebviewMessage"
+import type { ConsecutiveMistakeLimitContext, ConsecutiveMistakeLimitDecision, ToolApprovalRequest } from "@bedrock-coder/shared"
+import type { BedrockCoderAskQuestion, BedrockCoderMessage, TurnPhase } from "@shared/ExtensionMessage"
+import type { BedrockCoderAskResponse } from "@shared/WebviewMessage"
 import { Logger } from "@/shared/services/Logger"
 import { MessageIdMinter } from "./message-id-minter"
 import { buildToolApprovalAskMessage } from "./message-translator"
 import type { SdkMessageCoordinator } from "./sdk-message-coordinator"
 import { buildToolApprovalDenialReason } from "./tool-approval-denial"
 
-export interface ToolApprovalRequest {
-	agentId: string
-	conversationId: string
-	iteration: number
-	toolCallId: string
-	toolName: string
-	input: unknown
-	policy: { enabled?: boolean; autoApprove?: boolean }
-}
-
 export interface SdkInteractionCoordinatorOptions {
 	messages: SdkMessageCoordinator
 	getSessionId: () => string
 	postStateToWebview: () => Promise<void>
-	shouldAutoApproveTool?: (request: ToolApprovalRequest) => boolean
 	recordApprovedToolMessage?: (toolCallId: string, messageTs: number) => void
 	recordDeniedToolApproval?: (toolCallId: string, toolName: string, reason: string) => void
 	/**
@@ -37,11 +26,12 @@ export interface SdkInteractionCoordinatorOptions {
 	 */
 	setTurnPhase?: (phase: TurnPhase, anchorTs?: number) => void
 	/**
-	 * Invoked for manually-approved tools after the auto-approve short-circuit, BEFORE the
-	 * ask message is emitted. Used to open the edit diff preview so the user decides while
+	 * Invoked before the ask message is emitted. Used to open the edit diff preview so the user decides while
 	 * looking at the actual change. Must not throw; failures fall back to a plain ask.
 	 */
 	onToolApprovalAsk?: (request: ToolApprovalRequest) => Promise<void>
+	onRunWaitingForApproval?: (toolName?: string) => void
+	onRunResumed?: () => void
 }
 
 export class SdkInteractionCoordinator {
@@ -63,11 +53,11 @@ export class SdkInteractionCoordinator {
 	): Promise<ConsecutiveMistakeLimitDecision> {
 		const detail = context.details?.trim()
 		const latest = detail ? `${context.reason}: ${detail}` : `${context.reason} at iteration ${context.iteration}`
-		const askMessage: ClineMessage = {
+		const askMessage: BedrockCoderMessage = {
 			ts: this.nextMessageTs(),
 			type: "ask",
 			ask: "mistake_limit_reached",
-			text: `Cline ran into repeated tool errors (${context.consecutiveMistakes}/${context.maxConsecutiveMistakes}).\n\nLatest: ${latest}`,
+			text: `Bedrock Coder ran into repeated tool errors (${context.consecutiveMistakes}/${context.maxConsecutiveMistakes}).\n\nLatest: ${latest}`,
 			partial: false,
 		}
 
@@ -84,11 +74,7 @@ export class SdkInteractionCoordinator {
 	}
 
 	async handleRequestToolApproval(request: ToolApprovalRequest): Promise<{ approved: boolean; reason?: string }> {
-		if (request.policy.autoApprove === true || this.options.shouldAutoApproveTool?.(request) === true) {
-			Logger.log(`[SdkController] Auto-approving tool execution: tool=${request.toolName}`)
-			return { approved: true }
-		}
-
+		this.options.onRunWaitingForApproval?.(request.toolName)
 		// Open the edit diff preview before the Approve/Reject buttons render. This is the only
 		// pre-execution point where the adapter has the full tool input (the SDK emits the
 		// tool's content events only after approval resolves).
@@ -98,7 +84,11 @@ export class SdkInteractionCoordinator {
 			Logger.warn(`[SdkController] onToolApprovalAsk failed; showing plain approval ask: ${error}`)
 		}
 
-		const toolAskMessage: ClineMessage = buildToolApprovalAskMessage(request.toolName, request.input, this.nextMessageTs())
+		const toolAskMessage: BedrockCoderMessage = buildToolApprovalAskMessage(
+			request.toolName,
+			request.input,
+			this.nextMessageTs(),
+		)
 
 		this.options.messages.appendAndEmit([toolAskMessage], {
 			type: "status",
@@ -118,11 +108,12 @@ export class SdkInteractionCoordinator {
 	}
 
 	async handleAskQuestion(question: string, options: string[], _context: unknown): Promise<string> {
-		const askData: ClineAskQuestion = {
+		this.options.onRunWaitingForApproval?.("ask_question")
+		const askData: BedrockCoderAskQuestion = {
 			question,
 			options: options?.length ? options : undefined,
 		}
-		const askMessage: ClineMessage = {
+		const askMessage: BedrockCoderMessage = {
 			ts: this.nextMessageTs(),
 			type: "ask",
 			ask: "followup",
@@ -144,7 +135,7 @@ export class SdkInteractionCoordinator {
 
 	resolvePendingToolApproval(
 		prompt: string | undefined,
-		responseType: ClineAskResponse | undefined,
+		responseType: BedrockCoderAskResponse | undefined,
 		images?: string[],
 		files?: string[],
 	): boolean {
@@ -174,11 +165,12 @@ export class SdkInteractionCoordinator {
 		// Approved or rejected by approval controls, the agent resumes its turn and returns to streaming.
 		// On rejection the agent receives the denial and continues; the SDK drives the next phase.
 		this.options.setTurnPhase?.("streaming")
+		this.options.onRunResumed?.()
 		// The reason must state the operation did NOT happen (for edits: the file is
 		// unchanged) — raw feedback alone reads like iteration on an applied change.
 		const denialReason = buildToolApprovalDenialReason(pendingMessage?.toolName, prompt)
 		if (!approved && (prompt?.trim() || images?.length || files?.length)) {
-			const userMessage: ClineMessage = {
+			const userMessage: BedrockCoderMessage = {
 				ts: this.nextMessageTs(),
 				type: "say",
 				say: "user_feedback",
@@ -210,10 +202,10 @@ export class SdkInteractionCoordinator {
 		const resolve = this.pendingAskResolve
 		this.pendingAskResolve = undefined
 		const responseText = prompt ?? ""
-		Logger.log(`[SdkController] Resolving pending ask_question with: "${responseText.substring(0, 80)}"`)
+		Logger.log("[SdkController] Resolving pending ask_question")
 
 		if (responseText) {
-			const userMessage: ClineMessage = {
+			const userMessage: BedrockCoderMessage = {
 				ts: this.nextMessageTs(),
 				type: "say",
 				say: "user_feedback",
@@ -228,11 +220,12 @@ export class SdkInteractionCoordinator {
 
 		// User answered the follow-up — the agent resumes its turn.
 		this.options.setTurnPhase?.("streaming")
+		this.options.onRunResumed?.()
 		resolve(responseText)
 		return true
 	}
 
-	resolvePendingMistakeLimit(prompt: string | undefined, responseType: ClineAskResponse | undefined): boolean {
+	resolvePendingMistakeLimit(prompt: string | undefined, responseType: BedrockCoderAskResponse | undefined): boolean {
 		if (!this.pendingMistakeLimitResolve) {
 			return false
 		}
@@ -240,6 +233,7 @@ export class SdkInteractionCoordinator {
 		const resolve = this.pendingMistakeLimitResolve
 		this.pendingMistakeLimitResolve = undefined
 		this.options.setTurnPhase?.("streaming")
+		this.options.onRunResumed?.()
 
 		if (responseType === "noButtonClicked") {
 			resolve({ action: "stop", reason: "stopped after mistake_limit_reached prompt" })
@@ -248,7 +242,7 @@ export class SdkInteractionCoordinator {
 
 		const trimmedPrompt = prompt?.trim()
 		if (trimmedPrompt) {
-			const userMessage: ClineMessage = {
+			const userMessage: BedrockCoderMessage = {
 				ts: this.nextMessageTs(),
 				type: "say",
 				say: "user_feedback",

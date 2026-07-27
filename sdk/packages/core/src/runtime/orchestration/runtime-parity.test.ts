@@ -1,16 +1,15 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@cline/shared";
-import { setClineDir, setHomeDir } from "@cline/shared/storage";
+import type { AgentTool } from "@bedrock-coder/shared";
+import { setBedrockCoderDir, setHomeDir } from "@bedrock-coder/shared/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBuiltinTools } from "../../extensions/tools";
 import { DefaultRuntimeBuilder } from "./runtime-builder";
 
 type LegacyConfig = {
-	providerId: string;
+	providerId: "bedrock";
 	modelId: string;
-	apiKey: string;
 	systemPrompt: string;
 	cwd: string;
 	enableTools: boolean;
@@ -72,30 +71,29 @@ function makeSpawnTool(): AgentTool {
 describe("runtime tool parity", () => {
 	const envSnapshot = {
 		HOME: process.env.HOME,
-		CLINE_DIR: process.env.CLINE_DIR,
+		BEDROCK_CODER_DIR: process.env.BEDROCK_CODER_DIR,
 	};
 	let isolatedHomeDir = "";
 
 	beforeEach(() => {
 		isolatedHomeDir = mkdtempSync(join(tmpdir(), "runtime-parity-home-"));
 		process.env.HOME = isolatedHomeDir;
-		process.env.CLINE_DIR = join(isolatedHomeDir, ".cline");
+		process.env.BEDROCK_CODER_DIR = join(isolatedHomeDir, ".bedrock-coder");
 		setHomeDir(isolatedHomeDir);
-		setClineDir(process.env.CLINE_DIR);
+		setBedrockCoderDir(process.env.BEDROCK_CODER_DIR);
 	});
 
 	afterEach(() => {
 		process.env.HOME = envSnapshot.HOME;
-		process.env.CLINE_DIR = envSnapshot.CLINE_DIR;
+		process.env.BEDROCK_CODER_DIR = envSnapshot.BEDROCK_CODER_DIR;
 		setHomeDir(envSnapshot.HOME ?? "~");
-		setClineDir(envSnapshot.CLINE_DIR ?? join("~", ".cline"));
+		setBedrockCoderDir(envSnapshot.BEDROCK_CODER_DIR ?? join("~", ".bedrock-coder"));
 	});
 
 	it("matches legacy tool list when tools+spawn are enabled", async () => {
 		const config: LegacyConfig = {
-			providerId: "anthropic",
+			providerId: "bedrock",
 			modelId: "claude-sonnet-4-6",
-			apiKey: "key",
 			systemPrompt: "test",
 			cwd: makeEmptyWorkspaceCwd(),
 			enableTools: true,
@@ -119,9 +117,8 @@ describe("runtime tool parity", () => {
 
 	it("matches legacy tool list when only spawn is enabled", async () => {
 		const config: LegacyConfig = {
-			providerId: "anthropic",
+			providerId: "bedrock",
 			modelId: "claude-sonnet-4-6",
-			apiKey: "key",
 			systemPrompt: "test",
 			cwd: makeEmptyWorkspaceCwd(),
 			enableTools: false,
@@ -145,9 +142,8 @@ describe("runtime tool parity", () => {
 
 	it("matches legacy tool list when tools+spawn are disabled", async () => {
 		const config: LegacyConfig = {
-			providerId: "anthropic",
+			providerId: "bedrock",
 			modelId: "claude-sonnet-4-6",
-			apiKey: "key",
 			systemPrompt: "test",
 			cwd: makeEmptyWorkspaceCwd(),
 			enableTools: false,

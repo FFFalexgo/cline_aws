@@ -1,17 +1,16 @@
-import type * as LlmsProviders from "@cline/llms";
+import type * as LlmsProviders from "@bedrock-coder/llms";
 import type {
 	AgentMode,
 	AgentResult,
 	RuntimeConfigExtensionKind,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import type { HookEventPayload } from "../../hooks";
 import type { CheckpointEntry } from "../../hooks/checkpoint-hooks";
-import type { ProviderSettings } from "../../services/llms/provider-settings";
 import type { SessionCompactionState } from "../../session/models/session-compaction";
 import type { SessionManifest } from "../../session/models/session-manifest";
 import type { SessionSource } from "../../types/common";
 import type {
-	ClineCoreStartConfig,
+	BedrockCoderCoreStartConfig,
 	CoreSessionConfig,
 } from "../../types/config";
 import type {
@@ -54,7 +53,6 @@ export function isSessionNotFoundError(
 type LocalOnlyCoreSessionConfigKeys =
 	| "hooks"
 	| "logger"
-	| "telemetry"
 	| "extensionContext"
 	| "extraTools"
 	| "extensions"
@@ -93,7 +91,6 @@ export type LocalRuntimeBootstrapConfig = Pick<
 export interface LocalRuntimeStartOptions {
 	hooks?: LocalRuntimeBootstrapConfig["hooks"];
 	logger?: LocalRuntimeBootstrapConfig["logger"];
-	telemetry?: LocalRuntimeBootstrapConfig["telemetry"];
 	extensionContext?: LocalRuntimeBootstrapConfig["extensionContext"];
 	extraTools?: LocalRuntimeBootstrapConfig["extraTools"];
 	extensions?: LocalRuntimeBootstrapConfig["extensions"];
@@ -101,7 +98,6 @@ export interface LocalRuntimeStartOptions {
 	onConsecutiveMistakeLimitReached?: LocalRuntimeBootstrapConfig["onConsecutiveMistakeLimitReached"];
 	checkpoint?: LocalRuntimeBootstrapConfig["checkpoint"];
 	compaction?: LocalRuntimeBootstrapConfig["compaction"];
-	modelCatalogDefaults?: Partial<NonNullable<ProviderSettings["modelCatalog"]>>;
 	userInstructionService?: import("../../extensions/config").UserInstructionConfigService;
 	configExtensions?: RuntimeConfigExtensionKind[];
 	onTeamRestored?: () => void;
@@ -124,7 +120,7 @@ export interface StartSessionInput {
 	 */
 	localRuntime?: LocalRuntimeStartOptions;
 	capabilities?: RuntimeCapabilities;
-	toolPolicies?: import("@cline/shared").AgentConfig["toolPolicies"];
+	toolPolicies?: import("@bedrock-coder/shared").AgentConfig["toolPolicies"];
 }
 
 /** Session input after the execution host has resolved a concrete workspace. */
@@ -133,14 +129,13 @@ export interface ResolvedStartSessionInput
 	config: RuntimeSessionConfig;
 }
 
-export function splitCoreSessionConfig(config: ClineCoreStartConfig): {
+export function splitCoreSessionConfig(config: BedrockCoderCoreStartConfig): {
 	config: StartSessionConfig;
 	localRuntime?: LocalRuntimeStartOptions;
 } {
 	const {
 		hooks,
 		logger,
-		telemetry,
 		extensionContext,
 		extraTools,
 		extensions,
@@ -154,7 +149,6 @@ export function splitCoreSessionConfig(config: ClineCoreStartConfig): {
 	const localConfigOverrides: Partial<LocalRuntimeBootstrapConfig> = {};
 	if (hooks) localConfigOverrides.hooks = hooks;
 	if (logger) localConfigOverrides.logger = logger;
-	if (telemetry) localConfigOverrides.telemetry = telemetry;
 	if (extensionContext)
 		localConfigOverrides.extensionContext = extensionContext;
 	if (extraTools) localConfigOverrides.extraTools = extraTools;
@@ -295,6 +289,7 @@ export interface RestoreSessionInput {
 	restore?: {
 		messages?: boolean;
 		workspace?: boolean;
+		workspaceApproved?: boolean;
 		omitCheckpointMessageFromSession?: boolean;
 	};
 	start?: StartSessionInput;

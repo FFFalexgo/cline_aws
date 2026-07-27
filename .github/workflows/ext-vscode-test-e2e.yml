@@ -41,14 +41,12 @@ jobs:
                           - 'apps/vscode/proto/**'
                           - 'apps/vscode/tests/**'
                           - 'apps/vscode/scripts/**'
-                          - 'apps/vscode/standalone/**'
                           - 'apps/vscode/assets/**'
-                          - 'apps/vscode/walkthrough/**'
                           - 'apps/vscode/package.json'
                           - 'apps/vscode/webview-ui/package.json'
                           # Root bun lockfile is authoritative for the whole workspace (incl. apps/vscode).
                           - 'bun.lock'
-                          # SDK source packages are local workspace symlinks (@cline/*), so SDK changes affect the build.
+                          # SDK source packages are local workspace symlinks (@bedrock-coder/*), so SDK changes affect the build.
                           - 'sdk/packages/**'
                           - 'apps/vscode/buf.yaml'
                           - 'apps/vscode/tsconfig*.json'
@@ -134,7 +132,7 @@ jobs:
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-            # @cline/* are local workspace symlinks to source packages; build dist/
+            # @bedrock-coder/* are local workspace symlinks to source packages; build dist/
             # before building/packaging the extension for E2E.
             - name: Build SDK packages
               working-directory: ${{ github.workspace }}

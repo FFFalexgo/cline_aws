@@ -1,4 +1,4 @@
-import type { AgentToolContext, ApplyPatchExecutor, EditFileInput, EditorExecutor } from "@cline/core"
+import type { AgentToolContext, ApplyPatchExecutor, EditFileInput, EditorExecutor } from "@bedrock-coder/core"
 import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
@@ -26,10 +26,6 @@ class FakeEditPreview extends EditPreview {
 
 function makeContext(toolCallId: string, signal?: AbortSignal): AgentToolContext {
 	return { agentId: "agent", iteration: 1, toolCallId, signal }
-}
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 describe("computeNewEditorContent", () => {
@@ -210,8 +206,6 @@ describe("buildEditPreviewAnimation", () => {
 describe("SdkDiffEditCoordinator", () => {
 	let tempDir: string
 	let previews: FakeEditPreview[]
-	let previewTweak: ((preview: FakeEditPreview) => void) | undefined
-	let backgroundEdit: boolean
 	let fallbackEditor: Mock<EditorExecutor>
 	let fallbackApplyPatch: Mock<ApplyPatchExecutor>
 	let coordinator: SdkDiffEditCoordinator
@@ -221,16 +215,13 @@ describe("SdkDiffEditCoordinator", () => {
 	): SdkDiffEditCoordinator {
 		return new SdkDiffEditCoordinator({
 			getCwd: async () => tempDir,
-			isBackgroundEditEnabled: () => backgroundEdit,
 			createEditPreview: () => {
 				const preview = new FakeEditPreview()
-				previewTweak?.(preview)
 				previews.push(preview)
 				return preview
 			},
 			fallbackEditorExecutor: fallbackEditor,
 			fallbackApplyPatchExecutor: fallbackApplyPatch,
-			autoApprovePreviewLingerMs: 0,
 			...overrides,
 		})
 	}
@@ -238,8 +229,6 @@ describe("SdkDiffEditCoordinator", () => {
 	beforeEach(async () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "diff-edit-test-"))
 		previews = []
-		previewTweak = undefined
-		backgroundEdit = false
 		fallbackEditor = vi.fn<EditorExecutor>().mockResolvedValue("fallback editor result")
 		fallbackApplyPatch = vi.fn<ApplyPatchExecutor>().mockResolvedValue("fallback apply_patch result")
 		coordinator = makeCoordinator()
@@ -265,7 +254,7 @@ describe("SdkDiffEditCoordinator", () => {
 			displayPath: "a.ts",
 			leftContent: "line1\nline2\n",
 			rightContent: "changed\nline2\n",
-			title: "a.ts: Original ↔ Cline's Changes (Preview)",
+			title: "a.ts: Original ↔ Bedrock Coder's Changes (Preview)",
 		})
 	})
 
@@ -279,13 +268,6 @@ describe("SdkDiffEditCoordinator", () => {
 
 		await coordinator.openForApproval("tc2", "editor", { path: "missing.ts", new_text: "x", insert_line: 1 })
 		expect(previews).toHaveLength(1) // no second preview
-	})
-
-	it("does not open previews when background edit is enabled", async () => {
-		backgroundEdit = true
-		await writeFile("a.ts", "content")
-		await coordinator.openForApproval("tc1", "editor", { path: "a.ts", old_text: "content", new_text: "x" })
-		expect(previews).toHaveLength(0)
 	})
 
 	it("never throws from openForApproval and the executor still applies the edit", async () => {
@@ -325,66 +307,6 @@ describe("SdkDiffEditCoordinator", () => {
 		expect(previews[0].closed).toBe(1)
 	})
 
-	it("shows a brief preview around auto-approved edits and lingers after the write", async () => {
-		coordinator = makeCoordinator({ autoApprovePreviewLingerMs: 150 })
-		await writeFile("a.ts", "old content")
-		const input = { path: "a.ts", old_text: "old", new_text: "new" }
-
-		let settled = false
-		const promise = coordinator.executeEditorTool(input, tempDir, makeContext("tc1")).then((r) => {
-			settled = true
-			return r
-		})
-		await sleep(50)
-		// Write already delegated; executor is lingering with the preview open.
-		expect(previews).toHaveLength(1)
-		expect(fallbackEditor).toHaveBeenCalledOnce()
-		expect(previews[0].closed).toBe(0)
-		expect(settled).toBe(false)
-
-		expect(await promise).toBe("fallback editor result")
-		expect(previews[0].closed).toBe(1)
-	})
-
-	it("cuts the auto-approve linger short on abort without failing the applied edit", async () => {
-		coordinator = makeCoordinator({ autoApprovePreviewLingerMs: 10_000 })
-		await writeFile("a.ts", "old content")
-		const input = { path: "a.ts", old_text: "old", new_text: "new" }
-		const controller = new AbortController()
-
-		const promise = coordinator.executeEditorTool(input, tempDir, makeContext("tc1", controller.signal))
-		await sleep(50)
-		controller.abort()
-
-		expect(await promise).toBe("fallback editor result")
-		expect(previews[0].closed).toBe(1)
-	})
-
-	it("still applies auto-approved edits when the preview fails to open, and closes the partial preview", async () => {
-		previewTweak = (preview) => {
-			preview.failOpen = true
-		}
-		await writeFile("a.ts", "old content")
-		const input = { path: "a.ts", old_text: "old", new_text: "new" }
-
-		const result = await coordinator.executeEditorTool(input, tempDir, makeContext("tc1"))
-		expect(result).toBe("fallback editor result")
-		// A failed open() may have partially opened a tab before throwing; it is closed
-		// directly since the session was never registered for discardPreview to find.
-		expect(previews[0].closed).toBe(1)
-	})
-
-	it("delegates directly with no preview when background edit is enabled", async () => {
-		backgroundEdit = true
-		await writeFile("a.ts", "old content")
-		const input = { path: "a.ts", old_text: "old", new_text: "new" }
-
-		const result = await coordinator.executeEditorTool(input, tempDir, makeContext("tc1"))
-
-		expect(result).toBe("fallback editor result")
-		expect(previews).toHaveLength(0)
-	})
-
 	it("supersedes a pending same-file preview and the earlier executor does not reopen one", async () => {
 		await writeFile("a.ts", "alpha\nshared\n")
 		const first = { path: "a.ts", old_text: "alpha", new_text: "ALPHA" }
@@ -396,7 +318,7 @@ describe("SdkDiffEditCoordinator", () => {
 		expect(previews[0].closed).toBe(1)
 		expect(previews[1].opened?.rightContent).toBe("alpha\nSHARED\n")
 
-		// Executor #1 (session tombstoned) writes without opening a fresh auto-approve preview.
+		// Executor #1 (session tombstoned) writes without reopening a preview.
 		const result = await coordinator.executeEditorTool(first, tempDir, makeContext("tc1"))
 		expect(result).toBe("fallback editor result")
 		expect(previews).toHaveLength(2)
@@ -454,35 +376,35 @@ describe("SdkDiffEditCoordinator", () => {
 		expect(callOrder).toEqual(["close", "apply"])
 	})
 
-	it("shows a brief preview around auto-approved patches", async () => {
-		await writeFile("patched.ts", "line one\nline two\n")
-		const patch = ["*** Begin Patch", "*** Update File: patched.ts", "@@", "-line one", "+line ONE", "*** End Patch"].join(
-			"\n",
-		)
+	it("previews every file before approval and reports a partial application failure precisely", async () => {
+		const aPath = await writeFile("a.ts", "old a\n")
+		await writeFile("b.ts", "old b\n")
+		const patch = [
+			"*** Begin Patch",
+			"*** Update File: a.ts",
+			"@@",
+			"-old a",
+			"+new a",
+			"*** Update File: b.ts",
+			"@@",
+			"-old b",
+			"+new b",
+			"*** End Patch",
+		].join("\n")
 
-		const result = await coordinator.executeApplyPatchTool({ input: patch }, tempDir, makeContext("tc9"))
+		await coordinator.openForApproval("multi", "apply_patch", { input: patch })
 
-		expect(result).toBe("fallback apply_patch result")
-		expect(fallbackApplyPatch).toHaveBeenCalledOnce()
-		expect(previews).toHaveLength(1)
-		expect(previews[0].opened).toMatchObject({
-			absolutePath: path.join(tempDir, "patched.ts"),
-			leftContent: "line one\nline two\n",
-			rightContent: "line ONE\nline two\n",
+		expect(previews).toHaveLength(2)
+		expect(await fs.readFile(aPath, "utf-8")).toBe("old a\n")
+		expect(await fs.readFile(path.join(tempDir, "b.ts"), "utf-8")).toBe("old b\n")
+
+		fallbackApplyPatch.mockImplementationOnce(async () => {
+			await fs.writeFile(aPath, "new a\n")
+			throw new Error("simulated second-file write failure")
 		})
-		expect(previews[0].closed).toBe(1)
-	})
 
-	it("applies auto-approved patches without a preview when background edit is enabled", async () => {
-		backgroundEdit = true
-		const result = await coordinator.executeApplyPatchTool(
-			{ input: "*** Begin Patch\n*** End Patch" },
-			tempDir,
-			makeContext("tc9"),
+		await expect(coordinator.executeApplyPatchTool({ input: patch }, tempDir, makeContext("multi"))).rejects.toThrow(
+			"Patch application failed after approval. Applied: a.ts. Unchanged: b.ts. Cause: simulated second-file write failure",
 		)
-
-		expect(result).toBe("fallback apply_patch result")
-		expect(fallbackApplyPatch).toHaveBeenCalledOnce()
-		expect(previews).toHaveLength(0)
 	})
 })

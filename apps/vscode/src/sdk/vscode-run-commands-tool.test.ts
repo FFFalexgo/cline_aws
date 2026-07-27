@@ -1,4 +1,4 @@
-import { CommandExitError } from "@cline/core"
+import { CommandExitError } from "@bedrock-coder/core"
 import { EventEmitter } from "events"
 import * as fs from "fs"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -26,16 +26,6 @@ vi.mock("fs", async (importOriginal) => ({
 vi.mock("@/core/storage/StateManager", () => ({
 	StateManager: {
 		get: () => ({ getGlobalSettingsKey: mocks.getGlobalSettingsKey }),
-	},
-}))
-
-// The real telemetry proxy lazily initializes TelemetryService, which requires
-// a HostProvider that unit tests don't set up.
-vi.mock("@services/telemetry", () => ({
-	TerminalUserInterventionAction: { PROCESS_WHILE_RUNNING: "process_while_running" },
-	telemetryService: {
-		captureTerminalUserIntervention: () => {},
-		captureTerminalExecution: () => {},
 	},
 }))
 

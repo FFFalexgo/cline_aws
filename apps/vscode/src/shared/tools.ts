@@ -1,11 +1,5 @@
-import { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/index"
-import { FunctionDeclaration as GoogleTool } from "@google/genai"
-import { ChatCompletionTool as OpenAITool } from "openai/resources/chat/completions"
-
-type ClineTool = OpenAITool | AnthropicTool | GoogleTool
-
 // Define available tool ids
-export enum ClineDefaultTool {
+export enum BedrockCoderDefaultTool {
 	ASK = "ask_followup_question",
 	ATTEMPT = "attempt_completion",
 	BASH = "execute_command",

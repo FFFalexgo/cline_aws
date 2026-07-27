@@ -1,14 +1,11 @@
-import { getProviderAuthStorageId } from "@cline/core"
-import { createSessionId } from "@cline/shared"
-import { CLINE_ACCOUNT_AUTH_ERROR_MESSAGE } from "@shared/ClineAccount"
-import type { ClineMessage } from "@shared/ExtensionMessage"
+import { createSessionId } from "@bedrock-coder/shared"
+import type { BedrockCoderMessage } from "@shared/ExtensionMessage"
 import type { HistoryItem } from "@shared/HistoryItem"
 import type { Settings } from "@shared/storage/state-keys"
 import type { Mode } from "@shared/storage/types"
 import type { StateManager } from "@/core/storage/StateManager"
 import { Logger } from "@/shared/services/Logger"
 import { isDirectory } from "@/utils/fs"
-import { PROVIDER_FAILURE_ERROR_TYPE, PROVIDER_FAILURE_PHASE, type ProviderFailureTelemetry } from "./provider-failure-telemetry"
 import type { SdkMessageCoordinator } from "./sdk-message-coordinator"
 import type { SdkSessionConfigBuilder } from "./sdk-session-config-builder"
 import type { SdkSessionLifecycle } from "./sdk-session-lifecycle"
@@ -20,10 +17,6 @@ import type { VscodeSessionHost } from "./vscode-session-host"
 type StartInput = Parameters<VscodeSessionHost["start"]>[0]
 type InitialMessages = StartInput["initialMessages"]
 type SessionConfig = Awaited<ReturnType<SdkSessionConfigBuilder["build"]>>
-
-function usesClineAccountAuth(providerId: string): boolean {
-	return getProviderAuthStorageId(providerId) === "cline"
-}
 
 export interface SdkTaskStartCoordinatorOptions {
 	stateManager: StateManager
@@ -52,10 +45,10 @@ export interface SdkTaskStartCoordinatorOptions {
 	createTempSessionHost: () => Promise<SdkSessionHost>
 	loadInitialMessages: (reader: SdkSessionHost, taskId: string) => Promise<unknown[] | undefined>
 	resolveContextMentions: (text: string) => Promise<string>
-	isClineManagedProviderActive: () => boolean
-	emitClineAuthError: (task?: string) => void
-	captureProviderApiError?: (event: ProviderFailureTelemetry) => void
 	postStateToWebview: () => Promise<void>
+	revalidateBedrockForResume?: (taskId: string) => Promise<void>
+	onSessionAssigned?: (sessionId: string) => void
+	onInitError?: (error: unknown) => void
 }
 
 export class SdkTaskStartCoordinator {
@@ -68,16 +61,14 @@ export class SdkTaskStartCoordinator {
 		historyItem?: HistoryItem,
 		taskSettings?: Partial<Settings>,
 	): Promise<string | undefined> {
-		Logger.log(`[SdkController] initTask called: "${prompt?.substring(0, 50)}"`)
+		Logger.log("[SdkController] initTask called")
 		let taskSessionId: string | undefined
-		let providerId: string | undefined
-		let modelId: string | undefined
 		try {
 			await this.options.clearTask()
 
 			const cwd = await this.options.getWorkspaceRoot()
 			const mode = this.getCurrentMode()
-			Logger.log(`[SdkController] Building session config: mode=${mode}, cwd=${cwd}`)
+			Logger.log(`[SdkController] Building session config: mode=${mode}`)
 			const config = await this.options.sessionConfigBuilder.build({
 				prompt,
 				images,
@@ -87,24 +78,10 @@ export class SdkTaskStartCoordinator {
 				cwd,
 				mode,
 			})
-			providerId = config.providerId
-			modelId = config.modelId
-
-			Logger.log(
-				`[SdkController] Session config: provider=${config.providerId}, model=${config.modelId}, hasApiKey=${!!config.apiKey}`,
-			)
-
-			if (usesClineAccountAuth(config.providerId) && !config.apiKey) {
-				Logger.warn(
-					`[SdkController] ${config.providerId} provider selected but no Cline auth token — emitting auth error`,
-				)
-				// No task/session id exists yet, so this preflight auth UI path is
-				// intentionally not recorded as task-joinable provider error telemetry.
-				this.options.emitClineAuthError(prompt)
-				return undefined
-			}
+			Logger.log(`[SdkController] Session config: provider=bedrock, model=${config.modelId}`)
 
 			taskSessionId = config.sessionId?.trim() || createSessionId()
+			this.options.onSessionAssigned?.(taskSessionId)
 			const configWithSessionId = {
 				...config,
 				sessionId: taskSessionId,
@@ -130,6 +107,7 @@ export class SdkTaskStartCoordinator {
 				)
 				task.taskId = startResult.sessionId
 				taskSessionId = startResult.sessionId
+				this.options.onSessionAssigned?.(taskSessionId)
 			}
 
 			const newHistoryItem = this.options.createHistoryItemFromSession(
@@ -150,14 +128,7 @@ export class SdkTaskStartCoordinator {
 			Logger.log(`[SdkController] Task initialized: ${taskSessionId}`)
 			return taskSessionId
 		} catch (error) {
-			this.options.captureProviderApiError?.({
-				sessionId: taskSessionId,
-				error,
-				providerId,
-				modelId,
-				errorType: PROVIDER_FAILURE_ERROR_TYPE.TASK_INIT,
-				failurePhase: PROVIDER_FAILURE_PHASE.PREFLIGHT,
-			})
+			this.options.onInitError?.(error)
 			this.handleInitError(error, taskSessionId)
 			await this.options.postStateToWebview().catch((postError) => {
 				Logger.error("[SdkController] Failed to post state after init error:", postError)
@@ -168,6 +139,7 @@ export class SdkTaskStartCoordinator {
 
 	async reinitExistingTaskFromId(taskId: string): Promise<void> {
 		try {
+			await this.options.revalidateBedrockForResume?.(taskId)
 			await this.options.clearTask()
 
 			const historyItem = await this.options.taskHistory.findHistoryItem(taskId)
@@ -182,12 +154,15 @@ export class SdkTaskStartCoordinator {
 			// workspace root instead.
 			const storedCwd = historyItem.cwdOnTaskInitialization
 			const cwd = storedCwd && (await isDirectory(storedCwd)) ? storedCwd : await this.options.getWorkspaceRoot()
+			const tempManager = await this.options.createTempSessionHost()
+			const sourceRecord = await tempManager.get(taskId).catch(() => undefined)
+			const savedMode = sourceRecord?.metadata?.mode
+			const mode: Mode = savedMode === "plan" || savedMode === "act" ? savedMode : this.getCurrentMode()
 			const config = await this.options.sessionConfigBuilder.build({
 				cwd,
-				mode: "act",
+				mode,
 			})
 
-			const tempManager = await this.options.createTempSessionHost()
 			const initialMessages = await this.options.loadInitialMessages(tempManager, taskId)
 			await tempManager.dispose("readMessages")
 
@@ -195,7 +170,13 @@ export class SdkTaskStartCoordinator {
 				config,
 				interactive: true,
 				...(initialMessages ? { initialMessages: initialMessages as InitialMessages } : {}),
-				sessionMetadata: historyItemToSessionMetadata(historyItem, config.modelId),
+				sessionMetadata: {
+					...(sourceRecord?.metadata ?? {}),
+					...historyItemToSessionMetadata(historyItem, config.modelId),
+					schemaVersion: 2,
+					mode,
+					outcome: "interrupted",
+				},
 			})
 
 			this.createAndSetTask(startResult.sessionId)
@@ -223,7 +204,7 @@ export class SdkTaskStartCoordinator {
 	}
 
 	private emitInitialTaskMessage(sessionId: string, task: string): void {
-		const taskMessage: ClineMessage = {
+		const taskMessage: BedrockCoderMessage = {
 			ts: Date.now(),
 			type: "say",
 			say: "task",
@@ -240,8 +221,8 @@ export class SdkTaskStartCoordinator {
 		const errorDetails =
 			error instanceof Error ? `${error.name}: ${error.message}\n${error.stack?.substring(0, 500)}` : String(error)
 		Logger.error(`[SdkController] Failed to init task: ${errorDetails}`)
-		;(globalThis as Record<string, unknown>).__cline_last_init_error = errorDetails
-		;(globalThis as Record<string, unknown>).__cline_last_init_error_raw = error
+		;(globalThis as Record<string, unknown>).__bedrockCoder_last_init_error = errorDetails
+		;(globalThis as Record<string, unknown>).__bedrockCoder_last_init_error_raw = error
 		this.options.messages.appendAndEmit(
 			[
 				{
@@ -260,16 +241,6 @@ export class SdkTaskStartCoordinator {
 		Logger.error("[SdkController] Failed to reinit task:", error)
 
 		const reinitErrorMsg = error instanceof Error ? error.message : String(error)
-		const isClineAuthReinit =
-			this.options.isClineManagedProviderActive() &&
-			(reinitErrorMsg.includes(CLINE_ACCOUNT_AUTH_ERROR_MESSAGE) ||
-				reinitErrorMsg.toLowerCase().includes("missing api key") ||
-				reinitErrorMsg.toLowerCase().includes("unauthorized"))
-
-		if (isClineAuthReinit) {
-			this.options.emitClineAuthError()
-			return
-		}
 
 		this.options.messages.emitSessionEvents(
 			[

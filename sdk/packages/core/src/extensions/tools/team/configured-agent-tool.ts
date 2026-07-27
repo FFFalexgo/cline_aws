@@ -9,7 +9,7 @@ import {
 	type ToolApprovalResult,
 	type ToolPolicy,
 	zodToJsonSchema,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import { z } from "zod";
 import type { ConfiguredAgentConfig } from "./configured-agent-config";
 import {
@@ -143,7 +143,7 @@ function buildAgentRuntimeConfig(
 ): DelegatedAgentRuntimeConfig {
 	return {
 		...base,
-		providerId: agent.providerId ?? base.providerId,
+		providerId: "bedrock",
 		modelId: agent.modelId ?? base.modelId,
 		maxIterations: agent.maxIterations ?? base.maxIterations,
 	};

@@ -4,9 +4,6 @@
 		".": {
 			"entry": [
 				"src/extension.ts",
-				"src/standalone/cline-core.ts",
-				"src/generated/hosts/standalone/protobus-server-setup.ts",
-				"src/generated/hosts/standalone/host-bridge-clients.ts",
 				"src/generated/hosts/vscode/protobus-services.ts",
 				"src/generated/hosts/vscode/hostbridge-grpc-service-config.ts",
 				"src/**/*.test.ts",
@@ -19,6 +16,7 @@
 		},
 		"webview-ui": {
 			"entry": [
+				"src/main.tsx",
 				"src/services/grpc-client.ts",
 				"src/**/*.test.{ts,tsx}",
 				"src/**/*.spec.{ts,tsx}",

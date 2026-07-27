@@ -9,14 +9,11 @@ const mockExtensionState = vi.hoisted(() => ({
 		hooksEnabled: false,
 		showFeatureTips: false,
 		mcpDisplayMode: "rich",
-		yoloModeToggled: false,
 		useAutoCondense: false,
 		compactionStrategy: "basic",
 		subagentsEnabled: false,
-		worktreesEnabled: { user: true, featureFlag: true },
-		focusChainSettings: { enabled: false, remindClineInterval: 6 },
-		remoteConfigSettings: {},
-		backgroundEditEnabled: false,
+		worktreesEnabled: true,
+		focusChainSettings: { enabled: false, remindBedrockCoderInterval: 6 },
 	},
 }))
 

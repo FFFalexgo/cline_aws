@@ -17,8 +17,6 @@ export type HubCapabilityName =
 	| "session.get"
 	| "session.run"
 	| "session.abort"
-	| "schedule.create"
-	| "schedule.list"
 	| "settings.get"
 	| "settings.set";
 
@@ -30,8 +28,6 @@ export const HUB_CAPABILITIES: readonly HubCapabilityName[] = [
 	"session.get",
 	"session.run",
 	"session.abort",
-	"schedule.create",
-	"schedule.list",
 	"settings.get",
 	"settings.set",
 ];
@@ -278,130 +274,11 @@ export interface PeerHubRecord {
 	metadata?: Record<string, JsonValue | undefined>;
 }
 
-export interface ScheduleRecord {
-	scheduleId: string;
-	name: string;
-	cronPattern: string;
-	prompt: string;
-	workspaceRoot: string;
-	cwd?: string;
-	modelSelection?: GatewayModelSelection;
-	enabled: boolean;
-	mode?: "act" | "plan" | "yolo";
-	systemPrompt?: string;
-	maxIterations?: number;
-	timeoutSeconds?: number;
-	maxParallel?: number;
-	createdAt: number;
-	updatedAt: number;
-	nextRunAt?: number;
-	lastRunAt?: number;
-	createdBy?: string;
-	tags?: string[];
-	runtimeOptions?: HubSessionRuntimeOptions;
-	metadata?: Record<string, JsonValue | undefined>;
-}
-
-export type ScheduleExecutionStatus =
-	| "pending"
-	| "running"
-	| "success"
-	| "completed"
-	| "failed"
-	| "timeout"
-	| "aborted";
-
-export interface ScheduleExecutionRecord {
-	executionId: string;
-	scheduleId: string;
-	sessionId?: string;
-	triggeredAt: number;
-	startedAt?: number;
-	endedAt?: number;
-	status: ScheduleExecutionStatus;
-	exitCode?: number;
-	errorMessage?: string;
-	iterations?: number;
-	tokensUsed?: number;
-	costUsd?: number;
-}
-
-export const ONE_TIME_SCHEDULE_CRON_PATTERN = "0";
-export const ONE_TIME_SCHEDULE_RUN_AT_METADATA_KEY = "__hubScheduleRunAt";
-
-export const HUB_SCHEDULE_MODES = ["act", "plan", "yolo"] as const;
-export type HubScheduleMode = (typeof HUB_SCHEDULE_MODES)[number];
-
-export function isHubScheduleMode(value: unknown): value is HubScheduleMode {
-	return HUB_SCHEDULE_MODES.some((mode) => mode === value);
-}
-
-export function readHubScheduleMode(
-	payload: Record<string, unknown> | undefined,
-	defaultWhenAbsent: HubScheduleMode,
-): HubScheduleMode;
-export function readHubScheduleMode(
-	payload: Record<string, unknown> | undefined,
-): HubScheduleMode | undefined;
-export function readHubScheduleMode(
-	payload: Record<string, unknown> | undefined,
-	defaultWhenAbsent?: HubScheduleMode,
-): HubScheduleMode | undefined {
-	if (!payload || !Object.hasOwn(payload, "mode")) {
-		return defaultWhenAbsent;
-	}
-	const mode = payload.mode;
-	if (isHubScheduleMode(mode)) {
-		return mode;
-	}
-	throw new Error(`mode must be one of: ${HUB_SCHEDULE_MODES.join(", ")}`);
-}
-
-export interface HubScheduleCreateInput {
-	name: string;
-	cronPattern: string;
-	prompt: string;
-	workspaceRoot: string;
-	cwd?: string;
-	modelSelection?: GatewayModelSelection;
-	enabled?: boolean;
-	mode?: HubScheduleMode;
-	systemPrompt?: string;
-	maxIterations?: number;
-	timeoutSeconds?: number;
-	maxParallel?: number;
-	createdBy?: string;
-	tags?: string[];
-	runtimeOptions?: HubSessionRuntimeOptions;
-	metadata?: Record<string, JsonValue | undefined>;
-}
-
-export interface HubScheduleUpdateInput {
-	scheduleId: string;
-	name?: string;
-	cronPattern?: string;
-	prompt?: string;
-	workspaceRoot?: string;
-	cwd?: string;
-	modelSelection?: GatewayModelSelection;
-	enabled?: boolean;
-	mode?: HubScheduleMode;
-	systemPrompt?: string | null;
-	maxIterations?: number | null;
-	timeoutSeconds?: number | null;
-	maxParallel?: number;
-	createdBy?: string | null;
-	tags?: string[];
-	runtimeOptions?: HubSessionRuntimeOptions;
-	metadata?: Record<string, JsonValue | undefined>;
-}
-
 export type HubCommandName =
 	| "client.register"
 	| "client.update"
 	| "client.unregister"
 	| "client.list"
-	| "cline.account.get_current"
 	| "prompt_commands.list"
 	| "prompt_commands.execute"
 	| "mention_files.search"
@@ -436,28 +313,10 @@ export type HubCommandName =
 	| "peer.attach_session"
 	| "peer.detach_session"
 	| "peer.proxy_command"
-	| "schedule.create"
-	| "schedule.list"
-	| "schedule.get"
-	| "schedule.update"
-	| "schedule.delete"
-	| "schedule.enable"
-	| "schedule.disable"
-	| "schedule.trigger"
-	| "schedule.list_executions"
-	| "schedule.stats"
-	| "schedule.active"
-	| "schedule.upcoming"
 	| "settings.list"
 	| "settings.get"
 	| "settings.patch"
 	| "settings.toggle"
-	| "connector.channels"
-	| "connector.configure"
-	| "connector.delete_config"
-	| "cron.event.ingest"
-	| "cron.event.list"
-	| "cron.event.get"
 	| "ui.notify"
 	| "ui.show_window";
 
@@ -547,12 +406,6 @@ export type HubEventName =
 	| "peer.registered"
 	| "peer.session_attached"
 	| "peer.session_detached"
-	| "schedule.created"
-	| "schedule.updated"
-	| "schedule.deleted"
-	| "schedule.triggered"
-	| "schedule.execution_completed"
-	| "schedule.execution_failed"
 	| "settings.changed"
 	| "ui.notify"
 	| "ui.show_window"
@@ -692,7 +545,7 @@ export type HubClientContribution =
 	| HubClientUserInstructionServiceContribution;
 
 export interface HubSessionRuntimeOptions {
-	mode?: "act" | "plan" | "yolo";
+	mode?: "act" | "plan";
 	systemPrompt?: string;
 	maxIterations?: number;
 	timeoutSeconds?: number;
@@ -703,7 +556,6 @@ export interface HubSessionRuntimeOptions {
 	enableTools?: boolean;
 	enableSpawn?: boolean;
 	enableTeams?: boolean;
-	autoApproveTools?: boolean;
 	configExtensions?: RuntimeConfigExtensionKind[];
 	clientContributions?: HubClientContribution[];
 }
@@ -808,8 +660,6 @@ export interface HubStateSnapshot {
 	approvals: ApprovalRequestRecord[];
 	capabilityRequests: CapabilityRequestRecord[];
 	peers: PeerHubRecord[];
-	schedules?: ScheduleRecord[];
-	scheduleExecutions?: ScheduleExecutionRecord[];
 }
 
 export type HubTransportFrame =

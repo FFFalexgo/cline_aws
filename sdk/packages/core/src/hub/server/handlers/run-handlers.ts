@@ -3,7 +3,7 @@ import type {
 	AgentResult,
 	HubCommandEnvelope,
 	HubReplyEnvelope,
-} from "@cline/shared";
+} from "@bedrock-coder/shared";
 import { parseHookEventPayload } from "../../../hooks";
 import {
 	isSessionNotFoundError,
@@ -52,8 +52,13 @@ function sessionNotFoundReply(
 }
 
 function parseTurnMode(mode?: unknown): AgentMode | undefined {
-	// Unknown truthy values flow through and formatModePrompt treats them as act.
-	return mode ? (mode as AgentMode) : undefined;
+	if (mode === undefined) {
+		return undefined;
+	}
+	if (mode !== "act" && mode !== "plan") {
+		throw new Error("mode must be one of: act, plan");
+	}
+	return mode;
 }
 
 function parseRunTimeoutMs(

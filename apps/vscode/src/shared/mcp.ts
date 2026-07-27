@@ -28,7 +28,6 @@ export type McpTool = {
 	name: string
 	description?: string
 	inputSchema?: object
-	autoApprove?: boolean
 }
 
 export type McpResource = {
@@ -140,4 +139,4 @@ export type McpToolCallResponse = {
 	isError?: boolean
 }
 
-export type McpViewTab = "addRemote" | "configure"
+export type McpViewTab = "configure"

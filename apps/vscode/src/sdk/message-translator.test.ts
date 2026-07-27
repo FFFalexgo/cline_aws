@@ -1,6 +1,6 @@
-import type { CoreSessionEvent } from "@cline/core"
-import type { AgentEvent } from "@cline/shared"
-import type { ClineAskUseMcpServer } from "@shared/ExtensionMessage"
+import type { CoreSessionEvent } from "@bedrock-coder/core"
+import type { AgentEvent } from "@bedrock-coder/shared"
+import type { BedrockCoderAskUseMcpServer } from "@shared/ExtensionMessage"
 import { describe, expect, it } from "vitest"
 import {
 	extractToolOutputText,
@@ -524,8 +524,8 @@ describe("translateSessionEvent — agent_event content_start", () => {
 		expect(result.messages).toHaveLength(1)
 		expect(result.messages[0].say).toBe("tool")
 		expect(result.messages[0].partial).toBe(true)
-		// sdkToolToClineSayTool converts "read_files" → "readFile" and
-		// the text is JSON.stringify(ClineSayTool)
+		// sdkToolToBedrockCoderSayTool converts "read_files" → "readFile" and
+		// the text is JSON.stringify(BedrockCoderSayTool)
 		expect(result.messages[0].text).toContain("readFile")
 		expect(result.messages[0].text).toContain("/src/index.ts")
 	})
@@ -616,7 +616,7 @@ describe("translateSessionEvent — agent_event content_end", () => {
 
 		const result = translateSessionEvent(event, state)
 		expect(result.messages).toHaveLength(1)
-		// Tool content_end produces a ClineSayTool JSON with the tool name
+		// Tool content_end produces a BedrockCoderSayTool JSON with the tool name
 		expect(result.messages[0].say).toBe("tool")
 		expect(result.messages[0].text).toContain("readFile")
 		expect(result.messages[0].partial).toBe(false)
@@ -1106,124 +1106,7 @@ describe("translateSessionEvent — agent_event error", () => {
 		expect(result.turnComplete).toBe(true)
 	})
 
-	it("reshapes insufficient_credits error into ClineError-compatible format", () => {
-		const state = new MessageTranslatorState()
-		const errorJson = JSON.stringify({
-			code: "insufficient_credits",
-			current_balance: -0.14,
-			message: "Not enough credits available",
-		})
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-1",
-				event: {
-					type: "error",
-					error: { message: errorJson },
-				} as AgentEvent,
-			},
-		}
-
-		const result = translateSessionEvent(event, state)
-		expect(result.messages).toHaveLength(2)
-
-		// The api_req_failed text should be structured JSON that ClineError.parse() can handle
-		const failedText = result.messages[1].text!
-		const parsed = JSON.parse(failedText)
-		expect(parsed.code).toBe("insufficient_credits")
-		expect(parsed.providerId).toBe("cline")
-		expect(parsed.details.current_balance).toBe(-0.14)
-		expect(parsed.details.message).toBe("Not enough credits available")
-	})
-
-	it("preserves the active provider when reshaping insufficient_credits errors", () => {
-		const state = new MessageTranslatorState(undefined, () => "zai")
-		const errorJson = JSON.stringify({
-			code: "insufficient_credits",
-			current_balance: 0,
-			message: "账户余额不足，请充值后重试",
-		})
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-1",
-				event: {
-					type: "error",
-					error: { message: errorJson },
-				} as AgentEvent,
-			},
-		}
-
-		const result = translateSessionEvent(event, state)
-		const parsed = JSON.parse(result.messages[1].text!)
-		expect(parsed.code).toBe("insufficient_credits")
-		expect(parsed.providerId).toBe("zai")
-		expect(parsed.details.current_balance).toBe(0)
-	})
-
-	it("reshapes SPEND_LIMIT_EXCEEDED error into ClineError-compatible format", () => {
-		const state = new MessageTranslatorState()
-		const errorJson = JSON.stringify({
-			code: "SPEND_LIMIT_EXCEEDED",
-			limit_scope: "user",
-			budget_period: "daily",
-			limit_usd: 20.0,
-			spent_usd: 20.5,
-			resets_at: "2026-05-01T00:00:00Z",
-			message: "Your daily spend limit of $20.00 has been reached.",
-		})
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-1",
-				event: {
-					type: "error",
-					error: { message: errorJson },
-				} as AgentEvent,
-			},
-		}
-
-		const result = translateSessionEvent(event, state)
-		expect(result.messages).toHaveLength(2)
-
-		const failedText = result.messages[1].text!
-		const parsed = JSON.parse(failedText)
-		expect(parsed.code).toBe("SPEND_LIMIT_EXCEEDED")
-		expect(parsed.providerId).toBe("cline")
-		expect(parsed.details.budget_period).toBe("daily")
-		expect(parsed.details.limit_usd).toBe(20.0)
-	})
-
-	it("reshapes plain-text insufficient credits error into ClineError-compatible format", () => {
-		const state = new MessageTranslatorState()
-		// The SDK often extracts human-readable text from the API response,
-		// losing the structured JSON. This tests that plain-text balance errors
-		// are still detected and reshaped.
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-1",
-				event: {
-					type: "error",
-					error: {
-						message: "Insufficient balance. Your Cline Credits balance is $-0.14",
-					},
-				} as AgentEvent,
-			},
-		}
-
-		const result = translateSessionEvent(event, state)
-		expect(result.messages).toHaveLength(2)
-
-		const failedText = result.messages[1].text!
-		const parsed = JSON.parse(failedText)
-		expect(parsed.code).toBe("insufficient_credits")
-		expect(parsed.providerId).toBe("cline")
-		expect(parsed.details.current_balance).toBe(-0.14)
-		expect(parsed.details.message).toContain("Insufficient balance")
-	})
-
-	it("reshapes plain-text 'Not enough credits' error into ClineError-compatible format", () => {
+	it("rewrites a bare Bedrock 'model: <id>' error into an actionable message", () => {
 		const state = new MessageTranslatorState()
 		const event: CoreSessionEvent = {
 			type: "agent_event",
@@ -1231,7 +1114,7 @@ describe("translateSessionEvent — agent_event error", () => {
 				sessionId: "session-1",
 				event: {
 					type: "error",
-					error: { message: "Not enough credits available" },
+					error: { message: "model: anthropic.claude-3-haiku-20240307-v1:0" },
 				} as AgentEvent,
 			},
 		}
@@ -1240,73 +1123,7 @@ describe("translateSessionEvent — agent_event error", () => {
 		expect(result.messages).toHaveLength(2)
 
 		const failedText = result.messages[1].text!
-		const parsed = JSON.parse(failedText)
-		expect(parsed.code).toBe("insufficient_credits")
-		expect(parsed.providerId).toBe("cline")
-		expect(parsed.details.current_balance).toBe(0)
-	})
-
-	it("reshapes plain-text spend limit error into ClineError-compatible format", () => {
-		const state = new MessageTranslatorState()
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-1",
-				event: {
-					type: "error",
-					error: {
-						message: "Your daily spend limit of $20.00 has been reached.",
-					},
-				} as AgentEvent,
-			},
-		}
-
-		const result = translateSessionEvent(event, state)
-		expect(result.messages).toHaveLength(2)
-
-		const failedText = result.messages[1].text!
-		const parsed = JSON.parse(failedText)
-		expect(parsed.code).toBe("SPEND_LIMIT_EXCEEDED")
-		expect(parsed.providerId).toBe("cline")
-	})
-
-	it("preserves ClinePass period limit errors for specialized webview rendering", () => {
-		const state = new MessageTranslatorState(undefined, () => "cline-pass")
-		const message = "You have reached your weekly Clinepass limit. The limit resets in 7d, please try again later."
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-1",
-				event: {
-					type: "error",
-					error: { message },
-				} as AgentEvent,
-			},
-		}
-
-		const result = translateSessionEvent(event, state)
-		expect(result.messages).toHaveLength(2)
-		expect(result.messages[1].text).toBe(message)
-	})
-
-	it("rewrites Anthropic bare 'model: <id>' 404 into an actionable message", () => {
-		const state = new MessageTranslatorState(undefined, () => "anthropic")
-		const event: CoreSessionEvent = {
-			type: "agent_event",
-			payload: {
-				sessionId: "session-1",
-				event: {
-					type: "error",
-					error: { message: "model: claude-3-haiku-20240307" },
-				} as AgentEvent,
-			},
-		}
-
-		const result = translateSessionEvent(event, state)
-		expect(result.messages).toHaveLength(2)
-
-		const failedText = result.messages[1].text!
-		expect(failedText).toContain("claude-3-haiku-20240307")
+		expect(failedText).toContain("anthropic.claude-3-haiku-20240307-v1:0")
 		expect(failedText).toContain("was not found")
 		expect(failedText).toContain("API Configuration settings")
 	})
@@ -1319,7 +1136,7 @@ describe("translateSessionEvent — agent_event error", () => {
 				sessionId: "session-1",
 				event: {
 					type: "error",
-					error: { message: "The model `gpt-foo` does not exist" },
+					error: { message: "The model `anthropic.claude-missing-v1:0` does not exist" },
 				} as AgentEvent,
 			},
 		}
@@ -1328,7 +1145,7 @@ describe("translateSessionEvent — agent_event error", () => {
 		expect(result.messages).toHaveLength(2)
 
 		const failedText = result.messages[1].text!
-		expect(failedText).toContain("gpt-foo")
+		expect(failedText).toContain("anthropic.claude-missing-v1:0")
 		expect(failedText).toContain("API Configuration settings")
 	})
 
@@ -2512,7 +2329,7 @@ describe("translateSessionEvent — run_commands bare array/string input (ENG-18
 // S6-40: skills tool renders skill name (SDK input: { skill: "name" })
 // ---------------------------------------------------------------------------
 
-describe("sdkToolToClineSayTool — fetch_web_content and skills (S6-39, S6-40)", () => {
+describe("sdkToolToBedrock CoderSayTool — fetch_web_content and skills (S6-39, S6-40)", () => {
 	it("S6-39: fetch_web_content extracts URL from SDK requests array", () => {
 		const state = new MessageTranslatorState()
 		const event: CoreSessionEvent = {
@@ -2704,7 +2521,7 @@ describe("sdkToolToClineSayTool — fetch_web_content and skills (S6-39, S6-40)"
 // S6-47: search_codebase renders query and path correctly
 // ---------------------------------------------------------------------------
 
-describe("sdkToolToClineSayTool — search_codebase (S6-47)", () => {
+describe("sdkToolToBedrock CoderSayTool — search_codebase (S6-47)", () => {
 	it("S6-47: search_codebase with { queries: ['TODO', 'FIXME'] } extracts regex", () => {
 		const state = new MessageTranslatorState()
 		const event: CoreSessionEvent = {
@@ -2915,7 +2732,7 @@ describe("sdkToolToClineSayTool — search_codebase (S6-47)", () => {
 // S6-48: Editor diff rendering — search/replace format for old_text+new_text
 // ---------------------------------------------------------------------------
 
-describe("sdkToolToClineSayTool — editor diff rendering (S6-48)", () => {
+describe("sdkToolToBedrock CoderSayTool — editor diff rendering (S6-48)", () => {
 	it("S6-48: editor with old_text and new_text builds search/replace diff in content", () => {
 		const state = new MessageTranslatorState()
 		const event: CoreSessionEvent = {
@@ -3016,7 +2833,7 @@ describe("sdkToolToClineSayTool — editor diff rendering (S6-48)", () => {
 	// S6-48: apply_patch tool — content populated from SDK input field
 	// ---------------------------------------------------------------------------
 
-	describe("sdkToolToClineSayTool — apply_patch content (S6-48)", () => {
+	describe("sdkToolToBedrock CoderSayTool — apply_patch content (S6-48)", () => {
 		it("S6-48: apply_patch with SDK { input: '...' } populates both content and diff", () => {
 			const state = new MessageTranslatorState()
 			const patchContent = "*** Begin Patch\n*** Update File: src/file.ts\n@@\n-old\n+new\n*** End Patch"
@@ -3091,7 +2908,7 @@ describe("sdkToolToClineSayTool — editor diff rendering (S6-48)", () => {
 // ---------------------------------------------------------------------------
 
 describe("MCP tool rendering (serverName__toolName convention)", () => {
-	it("content_start for MCP tool emits say='use_mcp_server' with ClineAskUseMcpServer payload", () => {
+	it("content_start for MCP tool emits say='use_mcp_server' with Bedrock CoderAskUseMcpServer payload", () => {
 		const state = new MessageTranslatorState()
 		const event: CoreSessionEvent = {
 			type: "agent_event",
@@ -3112,14 +2929,14 @@ describe("MCP tool rendering (serverName__toolName convention)", () => {
 		expect(msg.type).toBe("say")
 		expect(msg.say).toBe("use_mcp_server")
 		expect(msg.partial).toBe(true)
-		const payload = JSON.parse(msg.text!) as ClineAskUseMcpServer
+		const payload = JSON.parse(msg.text!) as BedrockCoderAskUseMcpServer
 		expect(payload.type).toBe("use_mcp_tool")
 		expect(payload.serverName).toBe("notion")
 		expect(payload.toolName).toBe("notion-get-users")
 		expect(payload.arguments).toContain('"user_id"')
 	})
 
-	it("content_end for MCP tool emits finalized use_mcp_server + mcp_server_response", () => {
+	it("content_end for MCP tool emits a compact row and captures output for on-demand retention", () => {
 		const state = new MessageTranslatorState()
 		// content_start to set up state
 		translateSessionEvent(
@@ -3155,14 +2972,18 @@ describe("MCP tool rendering (serverName__toolName convention)", () => {
 			},
 			state,
 		)
-		expect(result.messages).toHaveLength(2)
+		expect(result.messages).toHaveLength(1)
 		expect(result.messages[0].say).toBe("use_mcp_server")
 		expect(result.messages[0].partial).toBe(false)
-		expect(result.messages[1].say).toBe("mcp_server_response")
-		expect(result.messages[1].text).toBe("User: Max (self)")
+		expect(result.toolResult).toMatchObject({
+			toolCallId: "c1",
+			toolName: "notion__notion-get-users",
+			content: "User: Max (self)",
+			isError: false,
+		})
 	})
 
-	it("content_end for MCP tool with error shows error in response", () => {
+	it("content_end for MCP tool preserves errors in the retained result", () => {
 		const state = new MessageTranslatorState()
 		translateSessionEvent(
 			{
@@ -3174,7 +2995,7 @@ describe("MCP tool rendering (serverName__toolName convention)", () => {
 						contentType: "tool",
 						toolName: "github__search-repos",
 						toolCallId: "c2",
-						input: { query: "cline" },
+						input: { query: "bedrockCoder" },
 					} as AgentEvent,
 				},
 			},
@@ -3196,9 +3017,12 @@ describe("MCP tool rendering (serverName__toolName convention)", () => {
 			},
 			state,
 		)
-		expect(result.messages).toHaveLength(2)
-		expect(result.messages[1].say).toBe("mcp_server_response")
-		expect(result.messages[1].text).toBe("Error: Auth failed")
+		expect(result.messages).toHaveLength(1)
+		expect(result.toolResult).toMatchObject({
+			toolCallId: "c2",
+			content: "Error: Auth failed",
+			isError: true,
+		})
 	})
 
 	it("MCP tool with empty input omits arguments", () => {
@@ -3219,7 +3043,7 @@ describe("MCP tool rendering (serverName__toolName convention)", () => {
 			},
 			state,
 		)
-		const payload = JSON.parse(result.messages[0].text!) as ClineAskUseMcpServer
+		const payload = JSON.parse(result.messages[0].text!) as BedrockCoderAskUseMcpServer
 		expect(payload.serverName).toBe("notion")
 		expect(payload.toolName).toBe("list-databases")
 		expect(payload.arguments).toBeUndefined()
