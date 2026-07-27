@@ -17,10 +17,10 @@ Choose one authentication source in **Settings → AWS Bedrock startup**:
 - **Access keys** accepts an access key ID, secret access key, and optional
   session token. You can enter the fields separately or paste the standard
   three-line `export AWS_...=...` block copied from AWS and save it in one
-  action. These values are write-only from the webview and are saved in the
-  restricted local secrets store at
+  action. These values are saved in the restricted local secrets store at
   `~/.bedrock-coder/data/secrets.json`, not in ordinary settings, diagnostics,
-  or session records.
+  or session records. They are returned to the webview only after the explicit
+  **Reveal saved credentials** action, which is excluded from recorder logs.
 
 Prefer temporary credentials with a session token where possible. Use
 **Remove saved keys** before disposing of a machine or switching identities.
@@ -42,3 +42,6 @@ bedrock:InvokeModelWithResponseStream
 STS `GetCallerIdentity` is also called during startup to distinguish invalid or
 expired credentials from Bedrock authorization failures. Only a masked account
 identifier may be displayed for the current extension session.
+
+See the repository [AWS configuration guide](../../README.md#configure-aws-bedrock)
+for access-key examples and instructions for creating `corp-ca-bundle.pem`.
