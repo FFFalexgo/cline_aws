@@ -14,7 +14,7 @@ function assert(condition, message) {
 assert(manifest.name === "bedrock-coder", `extension name is ${manifest.name}`)
 assert(manifest.displayName === "Bedrock Coder", `display name is ${manifest.displayName}`)
 assert(manifest.publisher === "fffalexgo", `publisher is ${manifest.publisher}`)
-assert(manifest.version === "0.1.1", `version is ${manifest.version}`)
+assert(manifest.version === "0.1.2", `version is ${manifest.version}`)
 assert(
 	manifest.description === "A local-first VS Code coding agent powered exclusively by Amazon Bedrock.",
 	"extension description drifted",
@@ -108,7 +108,7 @@ for (const entry of await readdir(sdkPackagesDir, { withFileTypes: true })) {
 	if (!(await Bun.file(packagePath).exists())) continue
 	const sdkManifest = await Bun.file(packagePath).json()
 	assert(sdkManifest.name?.startsWith("@bedrock-coder/"), `${entry.name} has package name ${sdkManifest.name}`)
-	assert(sdkManifest.version === "0.1.1", `${sdkManifest.name} has version ${sdkManifest.version}`)
+	assert(sdkManifest.version === "0.1.2", `${sdkManifest.name} has version ${sdkManifest.version}`)
 }
 
 const protoFiles = await readdir(path.join(extensionRoot, "proto", "bedrock_coder"))

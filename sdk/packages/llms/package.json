@@ -1,6 +1,6 @@
 {
 	"name": "@bedrock-coder/llms",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"private": true,
 	"description": "Amazon Bedrock runtime for Bedrock Coder agents",
 	"repository": {
