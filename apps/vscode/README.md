@@ -15,8 +15,10 @@ Choose one authentication source in **Settings → AWS Bedrock startup**:
 - **Environment / IAM role** uses the AWS SDK default credential chain.
 - **AWS profile / SSO** uses the selected named profile.
 - **Access keys** accepts an access key ID, secret access key, and optional
-  session token. These values are write-only from the webview and are saved in
-  the restricted local secrets store at
+  session token. You can enter the fields separately or paste the standard
+  three-line `export AWS_...=...` block copied from AWS and save it in one
+  action. These values are write-only from the webview and are saved in the
+  restricted local secrets store at
   `~/.bedrock-coder/data/secrets.json`, not in ordinary settings, diagnostics,
   or session records.
 

@@ -7,6 +7,7 @@ import { VSCodeButton, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { useEffect, useMemo, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { ModelsServiceClient } from "@/services/grpc-client"
+import { parseAwsCredentialExports } from "@/utils/awsCredentialExport"
 import { DebouncedTextField } from "../common/DebouncedTextField"
 import { useApiConfigurationHandlers } from "../utils/useApiConfigurationHandlers"
 
@@ -40,6 +41,7 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 	const [accessKeyId, setAccessKeyId] = useState("")
 	const [secretAccessKey, setSecretAccessKey] = useState("")
 	const [sessionToken, setSessionToken] = useState("")
+	const [credentialExports, setCredentialExports] = useState("")
 	const [credentialStatus, setCredentialStatus] = useState<string>()
 	const config = apiConfiguration ?? {}
 	const authMode = config.awsAuthMode ?? (config.awsProfile ? "profile" : "default")
@@ -53,20 +55,31 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 	const saveConnection = <K extends keyof ApiConfiguration>(field: K, value: ApiConfiguration[K]) => {
 		void handleFieldChange(field, value)
 	}
-	const saveAccessKeys = async () => {
+	const saveCredentialValues = async (credentials: { accessKeyId: string; secretAccessKey: string; sessionToken?: string }) => {
 		setCredentialStatus("Saving access keys…")
 		try {
 			await ModelsServiceClient.updateBedrockCredentials(
 				UpdateBedrockCredentialsRequest.create({
-					accessKeyId,
-					secretAccessKey,
-					sessionToken,
+					accessKeyId: credentials.accessKeyId,
+					secretAccessKey: credentials.secretAccessKey,
+					sessionToken: credentials.sessionToken ?? "",
 				}),
 			)
 			setAccessKeyId("")
 			setSecretAccessKey("")
 			setSessionToken("")
+			setCredentialExports("")
 			setCredentialStatus("Access keys saved. Bedrock validation is restarting.")
+		} catch (error) {
+			setCredentialStatus(error instanceof Error ? error.message : String(error))
+		}
+	}
+	const saveAccessKeys = () => {
+		void saveCredentialValues({ accessKeyId, secretAccessKey, sessionToken })
+	}
+	const saveExportedAccessKeys = () => {
+		try {
+			void saveCredentialValues(parseAwsCredentialExports(credentialExports))
 		} catch (error) {
 			setCredentialStatus(error instanceof Error ? error.message : String(error))
 		}
@@ -167,6 +180,32 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 							? "A complete access-key pair is saved. Enter new values below only to replace it."
 							: "No access-key pair is saved yet."}
 					</p>
+					<label className="flex flex-col gap-1">
+						<span>AWS export credentials</span>
+						<textarea
+							autoCapitalize="none"
+							autoCorrect="off"
+							className="box-border w-full resize-y bg-(--vscode-input-background) text-(--vscode-input-foreground) border border-solid border-(--vscode-input-border) p-2"
+							onChange={(event) => setCredentialExports(event.target.value)}
+							placeholder={`export AWS_ACCESS_KEY_ID=…
+export AWS_SECRET_ACCESS_KEY=…
+export AWS_SESSION_TOKEN=…`}
+							rows={4}
+							spellCheck={false}
+							value={credentialExports}
+						/>
+					</label>
+					<VSCodeButton disabled={!credentialExports.trim()} onClick={saveExportedAccessKeys}>
+						Save pasted credentials
+					</VSCodeButton>
+					<p className="text-xs text-description m-0">
+						Paste the complete block copied from AWS. It is parsed locally and cleared from this box after saving.
+					</p>
+					<div className="flex items-center gap-2 text-xs text-description">
+						<span className="grow border-t border-solid border-(--vscode-panel-border)" />
+						<span>or enter fields individually</span>
+						<span className="grow border-t border-solid border-(--vscode-panel-border)" />
+					</div>
 					<VSCodeTextField
 						onInput={(event) => setAccessKeyId((event.target as HTMLInputElement).value)}
 						placeholder="AKIA…"
@@ -191,9 +230,7 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 						Session token (optional)
 					</VSCodeTextField>
 					<div className="flex flex-wrap gap-2">
-						<VSCodeButton
-							disabled={!accessKeyId.trim() || !secretAccessKey.trim()}
-							onClick={() => void saveAccessKeys()}>
+						<VSCodeButton disabled={!accessKeyId.trim() || !secretAccessKey.trim()} onClick={saveAccessKeys}>
 							Save access keys
 						</VSCodeButton>
 						{awsAccessKeysConfigured && (
