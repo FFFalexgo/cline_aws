@@ -51,7 +51,7 @@ const sectionClass = "rounded border border-solid border-(--vscode-panel-border)
 const summaryClass = "cursor-pointer select-none"
 
 export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
-	const { apiConfiguration, awsAccessKeysConfigured, bedrockStartup } = useExtensionState()
+	const { apiConfiguration, awsAccessKeysConfigured, awsSessionTokenConfigured, bedrockStartup } = useExtensionState()
 	const { handleFieldChange } = useApiConfigurationHandlers()
 	const [now, setNow] = useState(Date.now())
 	const [accessKeyId, setAccessKeyId] = useState("")
@@ -178,8 +178,11 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 						onChange={(value) => saveConnection("awsRegion", value)}
 						placeholder={BEDROCK_DEFAULT_REGION}
 						style={{ width: "100%" }}>
-						AWS region
+						Bedrock Runtime region
 					</DebouncedTextField>
+					<p className="text-xs text-description -mt-2 mb-0">
+						Used for both regional model discovery and Bedrock Runtime.
+					</p>
 
 					<label className="flex flex-col gap-1">
 						<span>AWS authentication</span>
@@ -218,7 +221,11 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 								<strong>Access keys</strong>
 								<span className="text-xs text-description">
 									{" · "}
-									{awsAccessKeysConfigured ? "saved" : "not configured"}
+									{awsAccessKeysConfigured
+										? awsSessionTokenConfigured
+											? "3 values saved, including session token"
+											: "2 values saved, no session token"
+										: "not configured"}
 								</span>
 							</summary>
 							<div className="mt-3 flex flex-col gap-2">
@@ -307,10 +314,11 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 						onChange={(value) => saveConnection("awsBedrockEndpoint", value || undefined)}
 						placeholder="Optional Bedrock Runtime HTTPS endpoint"
 						style={{ width: "100%" }}>
-						Runtime endpoint (optional)
+						Bedrock Runtime endpoint URL (optional)
 					</DebouncedTextField>
 					<p className="text-xs text-description -mt-2 mb-0">
-						This must be a Bedrock Runtime endpoint. Identity Center and SSO URLs are not valid here.
+						Leave blank to use the regional AWS default. If supplied, this must match the Bedrock Runtime region
+						above.
 					</p>
 					<DebouncedTextField
 						initialValue={config.awsBedrockCaBundlePath || ""}
@@ -319,25 +327,6 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 						style={{ width: "100%" }}>
 						CA bundle path (optional)
 					</DebouncedTextField>
-				</div>
-			</details>
-
-			<details className={sectionClass}>
-				<summary className={summaryClass}>
-					<strong>Advanced control-plane endpoint</strong>
-				</summary>
-				<div className="mt-3">
-					<DebouncedTextField
-						initialValue={config.awsBedrockControlPlaneEndpoint || ""}
-						onChange={(value) => saveConnection("awsBedrockControlPlaneEndpoint", value || undefined)}
-						placeholder="Optional Bedrock control-plane HTTPS endpoint"
-						style={{ width: "100%" }}>
-						Control-plane endpoint (optional)
-					</DebouncedTextField>
-					<p className="text-xs text-description mt-1 mb-0">
-						Do not reuse a Runtime, Identity Center, or SSO endpoint. Model discovery uses the separate Bedrock
-						control-plane service.
-					</p>
 				</div>
 			</details>
 

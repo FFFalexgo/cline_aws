@@ -31,6 +31,7 @@ export async function getStateToPostToWebview(controller: {
 	const awsAccessKeysConfigured = Boolean(
 		stateManager.getSecretKey("awsAccessKeyId") && stateManager.getSecretKey("awsSecretAccessKey"),
 	)
+	const awsSessionTokenConfigured = Boolean(stateManager.getSecretKey("awsSessionToken"))
 	const taskHistory = stateManager.getGlobalStateKey("taskHistory")
 	const browserSettings = stateManager.getGlobalSettingsKey("browserSettings")
 	const preferredLanguage = stateManager.getGlobalSettingsKey("preferredLanguage")
@@ -85,6 +86,7 @@ export async function getStateToPostToWebview(controller: {
 		version,
 		apiConfiguration,
 		awsAccessKeysConfigured,
+		awsSessionTokenConfigured,
 		currentTaskItem,
 		bedrockCoderMessages,
 		checkpointRestoreInput,

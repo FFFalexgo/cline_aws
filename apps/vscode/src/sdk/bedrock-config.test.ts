@@ -50,4 +50,18 @@ describe("Bedrock access-key configuration", () => {
 		const stateManager = fakeStateManager({ awsAuthMode: "access-key" }, { awsAccessKeyId: "AKIATEST" })
 		await expect(createStoredBedrockCredentialProvider(stateManager)?.()).rejects.toThrow("Enter and save")
 	})
+
+	it("ignores obsolete custom control-plane endpoints and uses the regional AWS catalog", () => {
+		const connection = buildBedrockConnection({
+			awsRegion: "us-east-1",
+			awsBedrockEndpoint: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			awsBedrockControlPlaneEndpoint: "https://identitycenter.amazonaws.com/ssoins-stale",
+		})
+
+		expect(connection).toMatchObject({
+			region: "us-east-1",
+			endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com",
+		})
+		expect(connection.controlPlaneEndpoint).toBeUndefined()
+	})
 })

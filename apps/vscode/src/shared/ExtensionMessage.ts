@@ -35,6 +35,8 @@ export interface ExtensionState {
 	apiConfiguration?: ApiConfiguration
 	/** True when a complete access-key pair is present in the extension's restricted secrets store. */
 	awsAccessKeysConfigured?: boolean
+	/** True when the saved access-key credentials also include a temporary session token. */
+	awsSessionTokenConfigured?: boolean
 	bedrockStartup?: BedrockStartupState
 	browserSettings: BrowserSettings
 	remoteBrowserHost?: string

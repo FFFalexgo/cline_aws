@@ -52,7 +52,6 @@ export function buildBedrockConnection(
 		credentialSource,
 		endpoint: optionalString(configuration.awsBedrockEndpoint),
 		caBundlePath: optionalString(configuration.awsBedrockCaBundlePath),
-		controlPlaneEndpoint: optionalString(configuration.awsBedrockControlPlaneEndpoint),
 	}
 }
 

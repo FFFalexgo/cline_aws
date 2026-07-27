@@ -99,7 +99,7 @@ function suggestionFor(category: BedrockDoctorErrorCategory): string | undefined
 		case "proxy":
 			return "Check DNS and proxy access from the VS Code extension host."
 		case "endpoint":
-			return "Use separate HTTPS endpoints for Bedrock Runtime and the Bedrock control plane."
+			return "Leave the optional Runtime endpoint blank to use the AWS regional default, or enter the matching Bedrock Runtime HTTPS endpoint."
 		case "authorization":
 			return "Grant the required STS/Bedrock discovery and invocation actions, then retry."
 		case "throttling":
@@ -155,7 +155,9 @@ export function mapBedrockDoctorError(
 								: category === "proxy"
 									? "The AWS service could not be reached through the configured proxy."
 									: category === "endpoint"
-										? "The configured AWS endpoint is invalid or unreachable."
+										? context.service === "bedrock-runtime"
+											? "The configured Bedrock Runtime endpoint is invalid."
+											: "The regional Bedrock discovery endpoint is unreachable."
 										: category === "throttling"
 											? "AWS throttled the request."
 											: category === "model-validation"

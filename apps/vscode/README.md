@@ -25,10 +25,10 @@ Choose one authentication source in **Settings → AWS Bedrock startup**:
 Prefer temporary credentials with a session token where possible. Use
 **Remove saved keys** before disposing of a machine or switching identities.
 
-The Runtime endpoint and advanced control-plane endpoint are separate
-settings; a Runtime or VPC endpoint is not inferred as a control-plane
-endpoint. A configured CA bundle is applied to credential-provider calls, STS,
-Bedrock discovery, and Bedrock Runtime.
+The optional Runtime endpoint applies only to model invocation. Model discovery
+always uses the regional AWS Bedrock endpoint, matching the Python
+implementation. A configured CA bundle is applied to credential-provider
+calls, STS, Bedrock discovery, and Bedrock Runtime.
 
 The AWS identity needs permission for:
 
