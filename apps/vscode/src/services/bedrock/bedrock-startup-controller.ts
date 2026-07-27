@@ -245,6 +245,7 @@ export class BedrockStartupController {
 				foundationModelCount: result.foundationModelCount,
 				inferenceProfileCount: result.inferenceProfileCount,
 				inferenceProfilePages: result.inferenceProfilePages,
+				warnings: result.warnings,
 			}
 			BedrockStartupController.discoveryCache.set(key, discovery)
 			this.currentState = {
@@ -260,16 +261,23 @@ export class BedrockStartupController {
 				inferenceProfiles: result.inferenceProfileCount,
 				inferenceProfilePages: result.inferenceProfilePages,
 				fromCache: Boolean(cachedDiscovery),
+				warnings: result.warnings,
 			})
 
 			const savedId = this.options.stateManager.getGlobalSettingsKey("actModeApiModelId") || BEDROCK_DEFAULT_MODEL_ID
 			const savedTarget = result.targets.find((target) => target.invocationId === savedId || target.arn === savedId)
 			if (!savedTarget) {
+				const discoveryWarning = result.warnings?.join(" ")
 				this.transition("awaitingSelection", {
 					selectedTarget: undefined,
-					notice: savedId
-						? `The saved destination "${savedId}" is no longer returned as an invocable streaming text target. Choose another destination.`
-						: "Choose a Bedrock destination to run the compatibility probe.",
+					notice: [
+						discoveryWarning,
+						savedId
+							? `The saved destination "${savedId}" is no longer returned as an invocable streaming text target. Choose another destination.`
+							: "Choose a Bedrock destination to run the compatibility probe.",
+					]
+						.filter(Boolean)
+						.join(" "),
 				})
 				return
 			}

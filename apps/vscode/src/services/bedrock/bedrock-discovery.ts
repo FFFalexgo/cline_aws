@@ -17,6 +17,7 @@ export interface BedrockDiscoveryResult {
 	foundationModelCount: number
 	inferenceProfileCount: number
 	inferenceProfilePages: number
+	warnings?: string[]
 }
 
 function normalized(values: readonly string[] | undefined): string[] {
@@ -63,6 +64,10 @@ function targetKey(target: BedrockTarget): string {
 	return `${target.kind}:${target.invocationId}`
 }
 
+function throwIfCancelled(error: unknown, signal: AbortSignal): void {
+	if (signal.aborted || (error instanceof Error && error.name === "AbortError")) throw error
+}
+
 export class BedrockDiscoveryService {
 	constructor(private readonly client: BedrockControlPlaneClient) {}
 
@@ -70,11 +75,22 @@ export class BedrockDiscoveryService {
 		signal: AbortSignal,
 		onStage?: (stage: "discoveringModels" | "discoveringProfiles") => void,
 	): Promise<BedrockDiscoveryResult> {
+		const warnings = new Set<string>()
 		onStage?.("discoveringModels")
-		const foundationResponse = (await this.client.send(new ListFoundationModelsCommand({}), {
-			abortSignal: signal,
-		})) as { modelSummaries?: FoundationModelSummary[] }
-		const foundationSummaries = foundationResponse.modelSummaries ?? []
+		let foundationCatalogAvailable = false
+		let foundationFailure: unknown
+		let foundationSummaries: FoundationModelSummary[] = []
+		try {
+			const foundationResponse = (await this.client.send(new ListFoundationModelsCommand({}), {
+				abortSignal: signal,
+			})) as { modelSummaries?: FoundationModelSummary[] }
+			foundationSummaries = foundationResponse.modelSummaries ?? []
+			foundationCatalogAvailable = true
+		} catch (error) {
+			throwIfCancelled(error, signal)
+			foundationFailure = error
+			warnings.add("Foundation-model discovery failed; showing inference profiles discovered independently.")
+		}
 		const foundationTargets = foundationSummaries.flatMap((summary) => {
 			const target = foundationTarget(summary)
 			return target ? [target] : []
@@ -84,36 +100,51 @@ export class BedrockDiscoveryService {
 		const profileSummaries: InferenceProfileSummary[] = []
 		let nextToken: string | undefined
 		let inferenceProfilePages = 0
-		do {
-			const response = (await this.client.send(
-				new ListInferenceProfilesCommand({
-					maxResults: 1_000,
-					nextToken,
-				}),
-				{ abortSignal: signal },
-			)) as { inferenceProfileSummaries?: InferenceProfileSummary[]; nextToken?: string }
-			inferenceProfilePages += 1
-			profileSummaries.push(...(response.inferenceProfileSummaries ?? []))
-			nextToken = response.nextToken
-		} while (nextToken)
+		let profileCatalogAvailable = false
+		let profileFailure: unknown
+		try {
+			do {
+				const response = (await this.client.send(new ListInferenceProfilesCommand({ nextToken }), {
+					abortSignal: signal,
+				})) as { inferenceProfileSummaries?: InferenceProfileSummary[]; nextToken?: string }
+				profileCatalogAvailable = true
+				inferenceProfilePages += 1
+				profileSummaries.push(...(response.inferenceProfileSummaries ?? []))
+				nextToken = response.nextToken
+			} while (nextToken)
+		} catch (error) {
+			throwIfCancelled(error, signal)
+			profileFailure = error
+			warnings.add("Inference-profile discovery failed; showing foundation models discovered independently.")
+		}
+
+		if (!foundationCatalogAvailable && !profileCatalogAvailable) {
+			throw foundationFailure ?? profileFailure ?? new Error("Bedrock model discovery failed.")
+		}
 
 		const hydratedProfiles = await Promise.all(
 			profileSummaries.map(async (profile): Promise<InferenceProfileSummary> => {
 				if ((profile.models?.length ?? 0) > 0 || !profile.inferenceProfileId) return profile
-				const detail = (await this.client.send(
-					new GetInferenceProfileCommand({
-						inferenceProfileIdentifier: profile.inferenceProfileId,
-					}),
-					{ abortSignal: signal },
-				)) as GetInferenceProfileCommandOutput
-				return {
-					...profile,
-					models: detail.models,
-					inferenceProfileArn: detail.inferenceProfileArn ?? profile.inferenceProfileArn,
-					inferenceProfileId: detail.inferenceProfileId ?? profile.inferenceProfileId,
-					inferenceProfileName: detail.inferenceProfileName ?? profile.inferenceProfileName,
-					status: detail.status ?? profile.status,
-					type: detail.type ?? profile.type,
+				try {
+					const detail = (await this.client.send(
+						new GetInferenceProfileCommand({
+							inferenceProfileIdentifier: profile.inferenceProfileId,
+						}),
+						{ abortSignal: signal },
+					)) as GetInferenceProfileCommandOutput
+					return {
+						...profile,
+						models: detail.models,
+						inferenceProfileArn: detail.inferenceProfileArn ?? profile.inferenceProfileArn,
+						inferenceProfileId: detail.inferenceProfileId ?? profile.inferenceProfileId,
+						inferenceProfileName: detail.inferenceProfileName ?? profile.inferenceProfileName,
+						status: detail.status ?? profile.status,
+						type: detail.type ?? profile.type,
+					}
+				} catch (error) {
+					throwIfCancelled(error, signal)
+					warnings.add("Some inference-profile details could not be loaded.")
+					return profile
 				}
 			}),
 		)
@@ -147,23 +178,46 @@ export class BedrockDiscoveryService {
 			return undefined
 		}
 
-		const profileTargets = hydratedProfiles.flatMap((profile): BedrockTarget[] => {
-			if (profile.status !== "ACTIVE" || (profile.type !== "SYSTEM_DEFINED" && profile.type !== "APPLICATION")) {
-				return []
+		const resolveBaseModelId = (profile: InferenceProfileSummary, visited = new Set<string>()): string | undefined => {
+			const identity = profile.inferenceProfileArn ?? profile.inferenceProfileId
+			if (!identity || visited.has(identity)) return undefined
+			visited.add(identity)
+			for (const model of profile.models ?? []) {
+				const reference = model.modelArn
+				if (!reference) continue
+				const foundationId = reference.includes("foundation-model/") ? arnResourceId(reference) : undefined
+				if (foundationId) return foundationId
+				const nested = profilesByReference.get(reference) ?? profilesByReference.get(arnResourceId(reference) ?? "")
+				if (nested) {
+					const resolved = resolveBaseModelId(nested, visited)
+					if (resolved) return resolved
+				}
 			}
+			return undefined
+		}
+
+		const profileTargets = hydratedProfiles.flatMap((profile): BedrockTarget[] => {
+			if (profile.status !== "ACTIVE" || !profile.inferenceProfileId) return []
+			const profileType =
+				profile.type ??
+				(profile.inferenceProfileArn?.includes(":application-inference-profile/") ? "APPLICATION" : "SYSTEM_DEFINED")
+			if (profileType !== "SYSTEM_DEFINED" && profileType !== "APPLICATION") return []
+			if (profileType === "APPLICATION" && !profile.inferenceProfileArn) return []
 			const base = resolveBase(profile)
-			if (!base || !profile.inferenceProfileId || !profile.inferenceProfileArn) return []
+			const fallbackBaseModelId = foundationCatalogAvailable ? undefined : resolveBaseModelId(profile)
+			if (foundationCatalogAvailable && !base) return []
 			return [
 				{
 					kind: "inference-profile",
-					invocationId: profile.type === "APPLICATION" ? profile.inferenceProfileArn : profile.inferenceProfileId,
+					invocationId:
+						profileType === "APPLICATION" ? (profile.inferenceProfileArn as string) : profile.inferenceProfileId,
 					arn: profile.inferenceProfileArn,
 					displayName: profile.inferenceProfileName?.trim() || profile.inferenceProfileId,
-					providerName: base.providerName,
-					baseModelId: base.baseModelId,
-					profileType: profile.type,
-					inputModalities: base.inputModalities,
-					outputModalities: base.outputModalities,
+					providerName: base?.providerName,
+					baseModelId: base?.baseModelId ?? fallbackBaseModelId,
+					profileType,
+					inputModalities: base?.inputModalities ?? ["TEXT"],
+					outputModalities: base?.outputModalities ?? ["TEXT"],
 					streaming: true,
 					lifecycle: profile.status,
 				},
@@ -182,6 +236,7 @@ export class BedrockDiscoveryService {
 			foundationModelCount: foundationTargets.length,
 			inferenceProfileCount: profileTargets.length,
 			inferenceProfilePages,
+			warnings: [...warnings],
 		}
 	}
 }
