@@ -48,6 +48,8 @@ export class GrpcRecorderBuilder {
 			GrpcRecorderBuilder.recorder = GrpcRecorder.builder()
 				.enableIf(process.env.GRPC_RECORDER_ENABLED === "true" && process.env.BEDROCK_CODER_ENVIRONMENT === "local")
 				.withLogFileHandler(new LogFileHandler())
+				// This write-only RPC carries AWS secrets and must never enter recorder logs.
+				.withFilters((request) => request.method === "updateBedrockCredentials")
 				.build(controller)
 		}
 		return GrpcRecorderBuilder.recorder

@@ -17,6 +17,7 @@ export async function updateApiConfiguration(controller: Controller, request: Up
 		const next = { ...current }
 		const allowed = new Set([
 			"awsRegion",
+			"awsAuthMode",
 			"awsProfile",
 			"awsBedrockEndpoint",
 			"awsBedrockCaBundlePath",
@@ -38,6 +39,7 @@ export async function updateApiConfiguration(controller: Controller, request: Up
 		const connectionChanged = request.updateMask.some((path) =>
 			[
 				"options.awsRegion",
+				"options.awsAuthMode",
 				"options.awsProfile",
 				"options.awsBedrockEndpoint",
 				"options.awsBedrockCaBundlePath",

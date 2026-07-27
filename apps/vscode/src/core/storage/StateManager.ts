@@ -9,7 +9,6 @@ import {
 	type LocalState,
 	type LocalStateKey,
 	type SecretKey,
-	SecretKeys,
 	type Secrets,
 	type Settings,
 	type SettingsKey,
@@ -667,16 +666,10 @@ export class StateManager {
 	 * Construct API configuration from cached component keys
 	 */
 	private constructApiConfigurationFromCache(): ApiConfiguration {
-		// Build secrets object
-		const secrets = Object.fromEntries(SecretKeys.map((key) => [key, this.getSecret(key)])) as Secrets
-
 		// Build API handler settings object with task override support
 		const settings = Object.fromEntries(ApiHandlerSettingsKeys.map((key) => [key, this.getSettingWithOverride(key)]))
 
-		return {
-			...secrets,
-			...settings,
-		} satisfies ApiConfiguration
+		return settings satisfies ApiConfiguration
 	}
 
 	/**

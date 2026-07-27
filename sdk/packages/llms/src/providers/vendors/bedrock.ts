@@ -1,8 +1,8 @@
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import type { GatewayResolvedProviderConfig } from "@bedrock-coder/shared";
 import {
-	createBedrockTransport,
 	createBedrockCredentialProvider,
+	createBedrockTransport,
 	validateBedrockConnection,
 } from "../bedrock-transport";
 import type { BedrockConnection } from "../config";
@@ -21,6 +21,16 @@ function readConnection(config: GatewayResolvedProviderConfig): {
 	return {
 		connection: validateBedrockConnection({
 			region: raw.region,
+			credentialProvider:
+				typeof raw.credentialProvider === "function"
+					? raw.credentialProvider
+					: undefined,
+			credentialSource:
+				raw.credentialSource === "access-key" ||
+				raw.credentialSource === "profile" ||
+				raw.credentialSource === "default"
+					? raw.credentialSource
+					: undefined,
 			profile: typeof raw.profile === "string" ? raw.profile : undefined,
 			endpoint: typeof raw.endpoint === "string" ? raw.endpoint : undefined,
 			caBundlePath:

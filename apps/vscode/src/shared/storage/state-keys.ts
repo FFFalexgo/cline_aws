@@ -67,6 +67,7 @@ const GLOBAL_STATE_FIELDS = {
 // Fields that map directly to ApiHandlerOptions in @shared/api.ts
 const API_HANDLER_SETTINGS_FIELDS = {
 	awsRegion: { default: BEDROCK_DEFAULT_REGION as string },
+	awsAuthMode: { default: undefined as "default" | "profile" | "access-key" | undefined },
 	awsProfile: { default: undefined as string | undefined },
 	awsBedrockEndpoint: { default: undefined as string | undefined },
 	awsBedrockCaBundlePath: { default: undefined as string | undefined },
@@ -112,7 +113,7 @@ const GLOBAL_STATE_AND_SETTINGS_FIELDS = { ...GLOBAL_STATE_FIELDS, ...SETTINGS_F
 // ============================================================================
 
 // MCP OAuth is unrelated to model authentication and remains supported.
-const SECRETS_KEYS = ["mcpOAuthSecrets"] as const
+const SECRETS_KEYS = ["mcpOAuthSecrets", "awsAccessKeyId", "awsSecretAccessKey", "awsSessionToken"] as const
 
 // WARNING, these are not ALL of the local state keys in practice. For example, FileContextTracker
 // uses dynamic keys like pendingFileContextWarning_${taskId}.
@@ -135,7 +136,9 @@ type BuildInterface<T extends Record<string, { default: any }>> = { [K in keyof 
 export type GlobalState = BuildInterface<typeof GLOBAL_STATE_FIELDS>
 export type Settings = BuildInterface<typeof SETTINGS_FIELDS>
 export type ApiHandlerOptionSettings = BuildInterface<typeof API_HANDLER_SETTINGS_FIELDS>
-export type ApiHandlerSettings = ApiHandlerOptionSettings & Secrets
+// Inference credentials are intentionally excluded. They are write-only from
+// the webview and are injected into live Bedrock clients by the extension host.
+export type ApiHandlerSettings = ApiHandlerOptionSettings
 export type GlobalStateAndSettings = GlobalState & Settings
 
 // ============================================================================

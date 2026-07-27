@@ -5,6 +5,7 @@ export function convertApiConfigurationToProto(config: ApiConfiguration): ProtoA
 	return ProtoApiConfiguration.create({
 		ulid: config.ulid,
 		awsRegion: config.awsRegion,
+		awsAuthMode: config.awsAuthMode,
 		awsProfile: config.awsProfile,
 		awsBedrockEndpoint: config.awsBedrockEndpoint,
 		awsBedrockCaBundlePath: config.awsBedrockCaBundlePath,
@@ -22,6 +23,12 @@ export function convertProtoToApiConfiguration(protoConfig: ProtoApiConfiguratio
 	return {
 		ulid: protoConfig.ulid,
 		awsRegion: protoConfig.awsRegion ?? BEDROCK_DEFAULT_REGION,
+		awsAuthMode:
+			protoConfig.awsAuthMode === "default" ||
+			protoConfig.awsAuthMode === "profile" ||
+			protoConfig.awsAuthMode === "access-key"
+				? protoConfig.awsAuthMode
+				: undefined,
 		awsProfile: protoConfig.awsProfile,
 		awsBedrockEndpoint: protoConfig.awsBedrockEndpoint,
 		awsBedrockCaBundlePath: protoConfig.awsBedrockCaBundlePath,

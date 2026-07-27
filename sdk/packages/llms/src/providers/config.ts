@@ -1,4 +1,8 @@
-import type { BasicLogger, ExtensionContext, ModelInfo } from "@bedrock-coder/shared";
+import type {
+	BasicLogger,
+	ExtensionContext,
+	ModelInfo,
+} from "@bedrock-coder/shared";
 import {
 	BUILT_IN_PROVIDER,
 	BUILT_IN_PROVIDER_IDS,
@@ -18,6 +22,12 @@ export {
 export type ProviderId = "bedrock";
 export type ProviderCategory = "bedrock";
 
+export type BedrockCredentialProvider = () => PromiseLike<{
+	accessKeyId: string;
+	secretAccessKey: string;
+	sessionToken?: string;
+}>;
+
 export type ProviderCapability =
 	| "reasoning"
 	| "prompt-cache"
@@ -29,6 +39,9 @@ export type ProviderCapability =
 export interface BedrockConnection {
 	region: string;
 	profile?: string;
+	/** In-memory only. JSON persistence drops this function by design. */
+	credentialProvider?: BedrockCredentialProvider;
+	credentialSource?: "default" | "profile" | "access-key";
 	endpoint?: string;
 	caBundlePath?: string;
 	controlPlaneEndpoint?: string;

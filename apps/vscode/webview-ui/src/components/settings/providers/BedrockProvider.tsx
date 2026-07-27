@@ -1,9 +1,9 @@
 import { type ApiConfiguration, BEDROCK_DEFAULT_REGION } from "@shared/api"
 import { type BedrockTarget, bedrockTargetKey } from "@shared/bedrock-startup"
 import { EmptyRequest } from "@shared/proto/bedrock_coder/common"
-import { BedrockTargetSelectionRequest } from "@shared/proto/bedrock_coder/models"
+import { BedrockTargetSelectionRequest, UpdateBedrockCredentialsRequest } from "@shared/proto/bedrock_coder/models"
 import type { Mode } from "@shared/storage/types"
-import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeButton, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { useEffect, useMemo, useState } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { ModelsServiceClient } from "@/services/grpc-client"
@@ -34,10 +34,15 @@ function TargetOption({ target, failed }: { target: BedrockTarget; failed: boole
 }
 
 export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
-	const { apiConfiguration, bedrockStartup } = useExtensionState()
+	const { apiConfiguration, awsAccessKeysConfigured, bedrockStartup } = useExtensionState()
 	const { handleFieldChange } = useApiConfigurationHandlers()
 	const [now, setNow] = useState(Date.now())
+	const [accessKeyId, setAccessKeyId] = useState("")
+	const [secretAccessKey, setSecretAccessKey] = useState("")
+	const [sessionToken, setSessionToken] = useState("")
+	const [credentialStatus, setCredentialStatus] = useState<string>()
 	const config = apiConfiguration ?? {}
+	const authMode = config.awsAuthMode ?? (config.awsProfile ? "profile" : "default")
 
 	useEffect(() => {
 		if (!bedrockStartup?.progress.cancellable) return
@@ -47,6 +52,43 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 
 	const saveConnection = <K extends keyof ApiConfiguration>(field: K, value: ApiConfiguration[K]) => {
 		void handleFieldChange(field, value)
+	}
+	const saveAccessKeys = async () => {
+		setCredentialStatus("Saving access keys…")
+		try {
+			await ModelsServiceClient.updateBedrockCredentials(
+				UpdateBedrockCredentialsRequest.create({
+					accessKeyId,
+					secretAccessKey,
+					sessionToken,
+				}),
+			)
+			setAccessKeyId("")
+			setSecretAccessKey("")
+			setSessionToken("")
+			setCredentialStatus("Access keys saved. Bedrock validation is restarting.")
+		} catch (error) {
+			setCredentialStatus(error instanceof Error ? error.message : String(error))
+		}
+	}
+	const clearAccessKeys = async () => {
+		setCredentialStatus("Removing access keys…")
+		try {
+			await ModelsServiceClient.updateBedrockCredentials(
+				UpdateBedrockCredentialsRequest.create({
+					accessKeyId: "",
+					secretAccessKey: "",
+					sessionToken: "",
+					clear: true,
+				}),
+			)
+			setAccessKeyId("")
+			setSecretAccessKey("")
+			setSessionToken("")
+			setCredentialStatus("Saved access keys removed.")
+		} catch (error) {
+			setCredentialStatus(error instanceof Error ? error.message : String(error))
+		}
 	}
 	const foundationModels = useMemo(
 		() => bedrockStartup?.targets.filter((target) => target.kind === "foundation-model") ?? [],
@@ -74,8 +116,8 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 			<div>
 				<h3 className="m-0">AWS Bedrock startup</h3>
 				<p className="text-description m-0 mt-1">
-					Credentials come from the extension environment or the selected AWS profile. SSO authentication stays external
-					to the extension.
+					Choose the AWS credential source used by Bedrock Coder. Saved access keys stay in the extension host's
+					restricted secrets store and are never returned to the webview.
 				</p>
 			</div>
 
@@ -87,13 +129,85 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 				AWS region
 			</DebouncedTextField>
 
-			<DebouncedTextField
-				initialValue={config.awsProfile || ""}
-				onChange={(value) => saveConnection("awsProfile", value || undefined)}
-				placeholder="Optional, e.g. engineering-sso"
-				style={{ width: "100%" }}>
-				AWS profile (optional)
-			</DebouncedTextField>
+			<label className="flex flex-col gap-1">
+				<span>AWS authentication</span>
+				<select
+					className="w-full bg-(--vscode-dropdown-background) text-(--vscode-dropdown-foreground) border border-solid border-(--vscode-dropdown-border) p-1"
+					onChange={(event) =>
+						saveConnection("awsAuthMode", event.target.value as "default" | "profile" | "access-key")
+					}
+					value={authMode}>
+					<option value="default">Environment / IAM role</option>
+					<option value="profile">AWS profile / SSO</option>
+					<option value="access-key">Access keys</option>
+				</select>
+			</label>
+
+			{authMode === "profile" && (
+				<DebouncedTextField
+					initialValue={config.awsProfile || ""}
+					onChange={(value) => saveConnection("awsProfile", value || undefined)}
+					placeholder="e.g. engineering-sso"
+					style={{ width: "100%" }}>
+					AWS profile
+				</DebouncedTextField>
+			)}
+
+			{authMode === "default" && (
+				<p className="text-xs text-description m-0">
+					Uses AWS environment variables, EC2/ECS credentials, or another source in the standard AWS credential chain.
+				</p>
+			)}
+
+			{authMode === "access-key" && (
+				<div className="rounded border border-solid border-(--vscode-panel-border) p-3 flex flex-col gap-2">
+					<strong>Saved access keys</strong>
+					<p className="text-xs text-description m-0">
+						{awsAccessKeysConfigured
+							? "A complete access-key pair is saved. Enter new values below only to replace it."
+							: "No access-key pair is saved yet."}
+					</p>
+					<VSCodeTextField
+						onInput={(event) => setAccessKeyId((event.target as HTMLInputElement).value)}
+						placeholder="AKIA…"
+						style={{ width: "100%" }}
+						value={accessKeyId}>
+						Access key ID
+					</VSCodeTextField>
+					<VSCodeTextField
+						onInput={(event) => setSecretAccessKey((event.target as HTMLInputElement).value)}
+						placeholder="Secret access key"
+						style={{ width: "100%" }}
+						type="password"
+						value={secretAccessKey}>
+						Secret access key
+					</VSCodeTextField>
+					<VSCodeTextField
+						onInput={(event) => setSessionToken((event.target as HTMLInputElement).value)}
+						placeholder="Optional; required for temporary credentials"
+						style={{ width: "100%" }}
+						type="password"
+						value={sessionToken}>
+						Session token (optional)
+					</VSCodeTextField>
+					<div className="flex flex-wrap gap-2">
+						<VSCodeButton
+							disabled={!accessKeyId.trim() || !secretAccessKey.trim()}
+							onClick={() => void saveAccessKeys()}>
+							Save access keys
+						</VSCodeButton>
+						{awsAccessKeysConfigured && (
+							<VSCodeButton appearance="secondary" onClick={() => void clearAccessKeys()}>
+								Remove saved keys
+							</VSCodeButton>
+						)}
+					</div>
+					{credentialStatus && <p className="text-xs text-description m-0">{credentialStatus}</p>}
+					<p className="text-xs text-description m-0">
+						Prefer temporary credentials with a session token when possible. Never paste access keys into chat.
+					</p>
+				</div>
+			)}
 
 			<DebouncedTextField
 				initialValue={config.awsBedrockEndpoint || ""}

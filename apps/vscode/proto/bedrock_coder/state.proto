@@ -31,6 +31,9 @@ service StateService {
 // and use the scripts/generate-state-proto.mjs script to regenerate this list.
 message Secrets {
   optional string mcp_o_auth_secrets = 43;
+  optional string aws_access_key_id = 44;
+  optional string aws_secret_access_key = 45;
+  optional string aws_session_token = 46;
 }
 
 // NOTE: Add new fields under API_HANDLER_SETTINGS_FIELDS or USER_SETTINGS_FIELDS
@@ -66,6 +69,7 @@ message Settings {
   optional bool show_feature_tips = 182;
   optional string aws_bedrock_ca_bundle_path = 187;
   optional string aws_bedrock_control_plane_endpoint = 188;
+  optional string aws_auth_mode = 189;
 }
 
 message State {

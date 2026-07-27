@@ -10,12 +10,23 @@ streaming text foundation models and inference profiles from the regional
 Bedrock control plane, and probes only the selected destination through the
 same streaming runtime used by chat.
 
-Credentials come from the AWS SDK default credential chain or an optional
-named profile/SSO session. They are never stored by the extension. The Runtime
-endpoint and advanced control-plane endpoint are separate settings; a Runtime
-or VPC endpoint is not inferred as a control-plane endpoint. A configured CA
-bundle is applied to credential-provider calls, STS, Bedrock discovery, and
-Bedrock Runtime.
+Choose one authentication source in **Settings → AWS Bedrock startup**:
+
+- **Environment / IAM role** uses the AWS SDK default credential chain.
+- **AWS profile / SSO** uses the selected named profile.
+- **Access keys** accepts an access key ID, secret access key, and optional
+  session token. These values are write-only from the webview and are saved in
+  the restricted local secrets store at
+  `~/.bedrock-coder/data/secrets.json`, not in ordinary settings, diagnostics,
+  or session records.
+
+Prefer temporary credentials with a session token where possible. Use
+**Remove saved keys** before disposing of a machine or switching identities.
+
+The Runtime endpoint and advanced control-plane endpoint are separate
+settings; a Runtime or VPC endpoint is not inferred as a control-plane
+endpoint. A configured CA bundle is applied to credential-provider calls, STS,
+Bedrock discovery, and Bedrock Runtime.
 
 The AWS identity needs permission for:
 

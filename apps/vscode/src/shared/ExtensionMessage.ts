@@ -33,6 +33,8 @@ export interface ExtensionState {
 	isNewUser: boolean
 	welcomeViewCompleted: boolean
 	apiConfiguration?: ApiConfiguration
+	/** True when a complete access-key pair is present in the extension's restricted secrets store. */
+	awsAccessKeysConfigured?: boolean
 	bedrockStartup?: BedrockStartupState
 	browserSettings: BrowserSettings
 	remoteBrowserHost?: string

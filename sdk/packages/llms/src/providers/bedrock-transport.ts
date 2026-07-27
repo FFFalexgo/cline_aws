@@ -4,7 +4,7 @@ import { isAbsolute, resolve } from "node:path";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import { Agent as UndiciAgent, fetch as undiciFetch } from "undici";
-import type { BedrockConnection } from "./config";
+import type { BedrockConnection, BedrockCredentialProvider } from "./config";
 
 export interface BedrockTransport {
 	ca?: string;
@@ -12,12 +12,6 @@ export interface BedrockTransport {
 	requestHandler?: NodeHttpHandler;
 	dispose(): Promise<void>;
 }
-
-export type BedrockCredentialProvider = () => PromiseLike<{
-	accessKeyId: string;
-	secretAccessKey: string;
-	sessionToken?: string;
-}>;
 
 function resolveCaBundlePath(
 	caBundlePath: string,
@@ -103,6 +97,12 @@ export function validateBedrockConnection(
 
 	return {
 		region,
+		...(connection.credentialProvider
+			? { credentialProvider: connection.credentialProvider }
+			: {}),
+		...(connection.credentialSource
+			? { credentialSource: connection.credentialSource }
+			: {}),
 		...(connection.profile?.trim()
 			? { profile: connection.profile.trim() }
 			: {}),
@@ -156,6 +156,9 @@ export function createBedrockCredentialProvider(
 			? { requestHandler: transport.requestHandler }
 			: {}),
 	};
+	if (connection.credentialProvider) {
+		return connection.credentialProvider;
+	}
 	return connection.profile
 		? fromNodeProviderChain({
 				profile: connection.profile,

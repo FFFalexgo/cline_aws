@@ -15,6 +15,7 @@ export async function updateApiConfigurationProto(
 		const next = { ...previous, ...convertProtoToApiConfiguration(request.apiConfiguration) }
 		const connectionChanged = [
 			"awsRegion",
+			"awsAuthMode",
 			"awsProfile",
 			"awsBedrockEndpoint",
 			"awsBedrockCaBundlePath",

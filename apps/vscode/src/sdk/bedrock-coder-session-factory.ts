@@ -16,7 +16,7 @@ import * as vscode from "vscode"
 import { StateManager } from "@/core/storage/StateManager"
 import { HostProvider } from "@/hosts/host-provider"
 import { ExtensionRegistryInfo } from "@/registry"
-import { buildBedrockProviderConfig } from "./bedrock-config"
+import { buildBedrockProviderConfig, createStoredBedrockCredentialProvider } from "./bedrock-config"
 import { buildAgentHooks } from "./hooks-adapter"
 import type { SdkSessionHost } from "./session-host"
 
@@ -144,7 +144,12 @@ export async function buildSessionConfig(input: SessionConfigInput): Promise<Cor
 	return {
 		providerId: "bedrock",
 		modelId,
-		providerConfig: buildBedrockProviderConfig(apiConfiguration, modelId, workspaceRoot),
+		providerConfig: buildBedrockProviderConfig(
+			apiConfiguration,
+			modelId,
+			workspaceRoot,
+			createStoredBedrockCredentialProvider(stateManager),
+		),
 		cwd,
 		workspaceRoot,
 		systemPrompt,

@@ -16,8 +16,10 @@ choose in the extension.
 ## What makes this fork different
 
 - Amazon Bedrock is the only model provider.
-- AWS credentials come from the standard AWS SDK credential chain and are not
-  stored by the extension.
+- AWS credentials can come from the standard AWS SDK credential chain, a named
+  profile/SSO session, or access keys saved in the extension's restricted local
+  secrets store. Access keys are not placed in ordinary settings or returned to
+  the webview after saving.
 - Settings, history, sessions, rules, hooks, skills, and plugins live under the
   independent `.bedrock-coder/` identity.
 - The extension ID is `fffalexgo.bedrock-coder`, so it can be installed

@@ -42,6 +42,7 @@ export async function updateApiConfigurationPartial(
 		const connectionChanged = request.updateMask.some((field) =>
 			[
 				"awsRegion",
+				"awsAuthMode",
 				"awsProfile",
 				"awsBedrockEndpoint",
 				"awsBedrockCaBundlePath",

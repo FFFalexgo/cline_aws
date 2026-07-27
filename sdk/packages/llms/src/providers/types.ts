@@ -1,5 +1,6 @@
 export {
 	type BedrockConnection,
+	type BedrockCredentialProvider,
 	BUILT_IN_PROVIDER,
 	BUILT_IN_PROVIDER_IDS,
 	type BuiltInProviderId,

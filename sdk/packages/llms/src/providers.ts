@@ -12,6 +12,7 @@ export type {
 	ApiHandler,
 	ApiStreamChunk,
 	BedrockConnection,
+	BedrockCredentialProvider,
 	BuiltInProviderId,
 	ContentBlock,
 	FileContent,

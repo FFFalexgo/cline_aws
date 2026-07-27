@@ -28,6 +28,9 @@ export async function getStateToPostToWebview(controller: {
 
 	// Get API configuration from cache for immediate access
 	const apiConfiguration = stateManager.getApiConfiguration()
+	const awsAccessKeysConfigured = Boolean(
+		stateManager.getSecretKey("awsAccessKeyId") && stateManager.getSecretKey("awsSecretAccessKey"),
+	)
 	const taskHistory = stateManager.getGlobalStateKey("taskHistory")
 	const browserSettings = stateManager.getGlobalSettingsKey("browserSettings")
 	const preferredLanguage = stateManager.getGlobalSettingsKey("preferredLanguage")
@@ -81,6 +84,7 @@ export async function getStateToPostToWebview(controller: {
 	return {
 		version,
 		apiConfiguration,
+		awsAccessKeysConfigured,
 		currentTaskItem,
 		bedrockCoderMessages,
 		checkpointRestoreInput,

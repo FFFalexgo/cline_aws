@@ -1,4 +1,4 @@
-import { type ApiHandler, createBedrockClient, type ProviderConfig } from "@bedrock-coder/llms"
+import { type ApiHandler, type BedrockCredentialProvider, createBedrockClient, type ProviderConfig } from "@bedrock-coder/llms"
 import { type ApiConfiguration, BEDROCK_DEFAULT_MODEL_ID } from "@shared/api"
 import type { Mode } from "@shared/storage/types"
 import { buildBedrockProviderConfig } from "./bedrock-config"
@@ -6,6 +6,7 @@ import { buildBedrockProviderConfig } from "./bedrock-config"
 export interface BuildApiHandlerOptions {
 	disableReasoning?: boolean
 	workspaceRoot?: string
+	credentialProvider?: BedrockCredentialProvider
 }
 
 export function resolveBedrockModelId(configuration: ApiConfiguration, mode: Mode): string {
@@ -20,7 +21,7 @@ export function buildSdkProviderConfig(
 ): ProviderConfig {
 	const modelId = resolveBedrockModelId(configuration, mode)
 	const base: ProviderConfig = {
-		...buildBedrockProviderConfig(configuration, modelId, options?.workspaceRoot),
+		...buildBedrockProviderConfig(configuration, modelId, options?.workspaceRoot, options?.credentialProvider),
 		onRetryAttempt: configuration.onRetryAttempt,
 	}
 	if (options?.disableReasoning) {

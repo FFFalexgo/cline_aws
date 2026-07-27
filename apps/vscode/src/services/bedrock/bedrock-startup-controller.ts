@@ -10,7 +10,7 @@ import {
 	bedrockTargetKey,
 } from "@shared/bedrock-startup"
 import type { StateManager } from "@/core/storage/StateManager"
-import { buildBedrockConnection } from "@/sdk/bedrock-config"
+import { buildBedrockConnection, createStoredBedrockCredentialProvider } from "@/sdk/bedrock-config"
 import { LocalDiagnosticLogger } from "@/services/diagnostics/local-diagnostic-logger"
 import { Logger } from "@/shared/services/Logger"
 import type { BedrockDiscoveryResult } from "./bedrock-discovery"
@@ -41,9 +41,11 @@ const CANCELLABLE = new Set<BedrockStartupPhase>([
 ])
 
 function summary(connection: BedrockConnection): BedrockStartupState["connectionSummary"] {
+	const credentialLabel =
+		connection.credentialSource === "access-key" ? "Saved access keys" : connection.profile || "Default credential chain"
 	return {
 		region: connection.region,
-		profile: connection.profile || "Default credential chain",
+		profile: credentialLabel,
 		runtimeEndpoint: connection.endpoint || "Regional AWS endpoint",
 		controlPlaneEndpoint: connection.controlPlaneEndpoint || "Regional AWS endpoint",
 		caBundle: connection.caBundlePath || "System trust store",
@@ -185,7 +187,10 @@ export class BedrockStartupController {
 	}
 
 	private connection(): BedrockConnection {
-		return buildBedrockConnection(this.options.stateManager.getApiConfiguration())
+		return buildBedrockConnection(
+			this.options.stateManager.getApiConfiguration(),
+			createStoredBedrockCredentialProvider(this.options.stateManager),
+		)
 	}
 
 	private async cacheKey(connection: BedrockConnection, workspaceRoot?: string): Promise<string> {
@@ -204,6 +209,7 @@ export class BedrockStartupController {
 			runtimeEndpoint: connection.endpoint ?? "",
 			controlPlaneEndpoint: connection.controlPlaneEndpoint ?? "",
 			profile: connection.profile ?? "<default-chain>",
+			credentialSource: connection.credentialSource ?? "default",
 			caBundlePath: connection.caBundlePath ?? "",
 			caMtime,
 		})

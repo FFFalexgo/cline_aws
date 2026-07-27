@@ -21,6 +21,12 @@ export async function updateSettings(controller: Controller, request: UpdateSett
 
 			const convertedApiConfigurationFromProto = {
 				...protoApiConfiguration,
+				awsAuthMode:
+					protoApiConfiguration.awsAuthMode === "default" ||
+					protoApiConfiguration.awsAuthMode === "profile" ||
+					protoApiConfiguration.awsAuthMode === "access-key"
+						? (protoApiConfiguration.awsAuthMode as "default" | "profile" | "access-key")
+						: undefined,
 				planModeReasoningEffort: protoApiConfiguration.planModeReasoningEffort as OpenaiReasoningEffort | undefined,
 				actModeReasoningEffort: protoApiConfiguration.actModeReasoningEffort as OpenaiReasoningEffort | undefined,
 			}
