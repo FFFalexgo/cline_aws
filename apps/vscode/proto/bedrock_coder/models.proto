@@ -14,6 +14,7 @@ service ModelsService {
   rpc updateApiConfiguration(UpdateApiConfigurationRequestNew) returns (Empty);
   rpc updateApiConfigurationPartial(UpdateApiConfigurationPartialRequest) returns (Empty);
   rpc updateBedrockCredentials(UpdateBedrockCredentialsRequest) returns (Empty);
+  rpc revealBedrockCredentials(EmptyRequest) returns (BedrockCredentials);
   rpc refreshBedrockDiscovery(EmptyRequest) returns (Empty);
   rpc retryBedrockStartup(EmptyRequest) returns (Empty);
   rpc cancelBedrockStartup(EmptyRequest) returns (Empty);
@@ -94,12 +95,21 @@ message UpdateApiConfigurationPartialRequest {
   google.protobuf.FieldMask update_mask = 3;
 }
 
-// Write-only request. The extension never returns these values to the webview.
+// Write-only update request. Saved values are returned only by the separate,
+// explicit revealBedrockCredentials action.
 message UpdateBedrockCredentialsRequest {
   string access_key_id = 1;
   string secret_access_key = 2;
   string session_token = 3;
   bool clear = 4;
+}
+
+// Returned only after an explicit reveal action. This RPC is excluded from
+// request/response recording and the result is never added to extension state.
+message BedrockCredentials {
+  string access_key_id = 1;
+  string secret_access_key = 2;
+  string session_token = 3;
 }
 
 message BedrockTargetSelectionRequest {

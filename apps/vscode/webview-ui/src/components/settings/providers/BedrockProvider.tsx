@@ -17,6 +17,24 @@ interface BedrockProviderProps {
 	currentMode: Mode
 }
 
+interface RevealedCredentials {
+	accessKeyId: string
+	secretAccessKey: string
+	sessionToken: string
+}
+
+function quotedExportValue(value: string): string {
+	return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+function credentialExportBlock(credentials: RevealedCredentials): string {
+	return [
+		`export AWS_ACCESS_KEY_ID=${quotedExportValue(credentials.accessKeyId)}`,
+		`export AWS_SECRET_ACCESS_KEY=${quotedExportValue(credentials.secretAccessKey)}`,
+		`export AWS_SESSION_TOKEN=${quotedExportValue(credentials.sessionToken)}`,
+	].join("\n")
+}
+
 function TargetOption({ target, failed }: { target: BedrockTarget; failed: boolean }) {
 	const targetType =
 		target.kind === "inference-profile"
@@ -59,6 +77,7 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 	const [sessionToken, setSessionToken] = useState("")
 	const [credentialExports, setCredentialExports] = useState("")
 	const [credentialStatus, setCredentialStatus] = useState<string>()
+	const [revealedCredentials, setRevealedCredentials] = useState<RevealedCredentials>()
 	const [pendingTargetKey, setPendingTargetKey] = useState("")
 	const config = apiConfiguration ?? {}
 	const authMode = config.awsAuthMode ?? (config.awsProfile ? "profile" : "default")
@@ -89,6 +108,11 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 					sessionToken: credentials.sessionToken ?? "",
 				}),
 			)
+			setRevealedCredentials({
+				accessKeyId: credentials.accessKeyId,
+				secretAccessKey: credentials.secretAccessKey,
+				sessionToken: credentials.sessionToken ?? "",
+			})
 			setAccessKeyId("")
 			setSecretAccessKey("")
 			setSessionToken("")
@@ -122,10 +146,35 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 			setAccessKeyId("")
 			setSecretAccessKey("")
 			setSessionToken("")
+			setRevealedCredentials(undefined)
 			setCredentialStatus("Saved access keys removed.")
 		} catch (error) {
 			setCredentialStatus(error instanceof Error ? error.message : String(error))
 		}
+	}
+	const revealSavedCredentials = async () => {
+		setCredentialStatus("Loading saved credentials…")
+		try {
+			const credentials = await ModelsServiceClient.revealBedrockCredentials(EmptyRequest.create())
+			if (!credentials.accessKeyId || !credentials.secretAccessKey) {
+				setRevealedCredentials(undefined)
+				setCredentialStatus("No complete access-key pair is saved.")
+				return
+			}
+			setRevealedCredentials({
+				accessKeyId: credentials.accessKeyId,
+				secretAccessKey: credentials.secretAccessKey,
+				sessionToken: credentials.sessionToken,
+			})
+			setCredentialStatus("Saved credentials revealed below.")
+		} catch (error) {
+			setCredentialStatus(error instanceof Error ? error.message : String(error))
+		}
+	}
+	const copyRevealedCredentials = async () => {
+		if (!revealedCredentials) return
+		await navigator.clipboard.writeText(credentialExportBlock(revealedCredentials))
+		setCredentialStatus("Saved credentials copied as three export lines.")
 	}
 
 	const foundationModels = useMemo(
@@ -247,6 +296,38 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 								<VSCodeButton disabled={!credentialExports.trim()} onClick={saveExportedAccessKeys}>
 									Save pasted credentials
 								</VSCodeButton>
+
+								{awsAccessKeysConfigured && (
+									<div className="flex flex-col gap-2">
+										<div className="flex flex-wrap gap-2">
+											<VSCodeButton
+												appearance="secondary"
+												onClick={() =>
+													revealedCredentials
+														? setRevealedCredentials(undefined)
+														: void revealSavedCredentials()
+												}>
+												{revealedCredentials ? "Hide saved credentials" : "Reveal saved credentials"}
+											</VSCodeButton>
+											{revealedCredentials && (
+												<VSCodeButton
+													appearance="secondary"
+													onClick={() => void copyRevealedCredentials()}>
+													Copy exports
+												</VSCodeButton>
+											)}
+										</div>
+										{revealedCredentials && (
+											<textarea
+												className="box-border w-full resize-y bg-(--vscode-input-background) text-(--vscode-input-foreground) border border-solid border-(--vscode-input-border) p-2 font-mono text-xs"
+												readOnly
+												rows={4}
+												spellCheck={false}
+												value={credentialExportBlock(revealedCredentials)}
+											/>
+										)}
+									</div>
+								)}
 
 								<details>
 									<summary className={`${summaryClass} text-description`}>

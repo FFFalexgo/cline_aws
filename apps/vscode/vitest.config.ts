@@ -24,6 +24,7 @@ export default defineConfig({
 			"src/core/controller/models/__tests__/refreshBedrockCoderRecommendedModels.test.ts",
 			"src/core/controller/models/__tests__/refreshGroqModels.test.ts",
 			"src/core/controller/models/__tests__/refreshOpenAiModels.test.ts",
+			"src/core/controller/models/revealBedrockCredentials.test.ts",
 		],
 		environment: "node",
 		setupFiles: ["./src/test/vitest-setup.ts"],
