@@ -14,13 +14,24 @@
  */
 @layer base {
 	* {
-		@apply border-border outline-ring/50 text-base;
+		@apply border-border;
 	}
 	body {
-		@apply bg-background text-foreground;
+		@apply bg-background text-foreground font-base text-base;
+		line-height: 1.5;
+	}
+	button,
+	input,
+	textarea,
+	select {
+		font: inherit;
+	}
+	:focus-visible {
+		outline: 1px solid var(--vscode-focusBorder);
+		outline-offset: 2px;
 	}
 	p {
-		@apply my-0 py-0 text-inherit leading-5 block line-clamp-3;
+		@apply py-0 text-inherit;
 		margin-block-start: 1em;
 		margin-block-end: 1em;
 		margin-inline-start: 0px;
@@ -28,8 +39,8 @@
 		unicode-bidi: isolate;
 	}
 	span {
-		@apply leading-5;
 		font-size: inherit;
+		line-height: inherit;
 		color: inherit;
 	}
 	pre {
@@ -47,12 +58,12 @@
 		font-weight: var(--font-weight-semibold);
 	}
 	h3 {
-		font-size: var(--text-sm);
+		font-size: var(--text-base);
 		font-weight: var(--font-weight-semibold);
 	}
 	h4 {
-		font-size: var(--text-base);
-		font-weight: var(--font-weight-bold);
+		font-size: var(--text-sm);
+		font-weight: var(--font-weight-semibold);
 	}
 	a {
 		@apply text-link hover:text-link-hover;
@@ -67,5 +78,16 @@
 	[role="radio"],
 	[role="checkbox"] {
 		margin: calc(var(--design-unit) * 1px) 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
 	}
 }

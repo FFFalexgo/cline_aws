@@ -7,12 +7,12 @@ type SwitchSize = "default" | "lg"
 
 const sizeStyles: Record<SwitchSize, { root: string; thumb: string }> = {
 	default: {
-		root: "h-3 w-6",
-		thumb: "h-2 w-2 data-[state=checked]:translate-x-2.5",
+		root: "h-[18px] w-8",
+		thumb: "size-[14px] data-[state=checked]:translate-x-3.5",
 	},
 	lg: {
-		root: "h-5 w-10",
-		thumb: "h-4 w-4 data-[state=checked]:translate-x-[1.3rem]",
+		root: "h-5 w-9",
+		thumb: "size-[16px] data-[state=checked]:translate-x-4",
 	},
 }
 
@@ -24,7 +24,7 @@ const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitives.Root>, 
 	({ className, size = "default", ...props }, ref) => (
 		<SwitchPrimitives.Root
 			className={cn(
-				"peer inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-button-background/60 data-[state=unchecked]:bg-[#8B8B8B]",
+				"peer inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-button-background data-[state=unchecked]:bg-description",
 				sizeStyles[size].root,
 				className,
 			)}
@@ -32,7 +32,7 @@ const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitives.Root>, 
 			ref={ref}>
 			<SwitchPrimitives.Thumb
 				className={cn(
-					"pointer-events-none block rounded-full bg-button-foreground/80 shadow-lg transition-transform data-[state=unchecked]:translate-x-0",
+					"pointer-events-none block rounded-full bg-button-foreground transition-transform duration-150 data-[state=unchecked]:translate-x-0",
 					sizeStyles[size].thumb,
 				)}
 			/>

@@ -3,8 +3,11 @@ import { type BedrockDoctorError, type BedrockTarget, bedrockTargetKey } from "@
 import { EmptyRequest } from "@shared/proto/bedrock_coder/common"
 import { BedrockTargetSelectionRequest, UpdateBedrockCredentialsRequest } from "@shared/proto/bedrock_coder/models"
 import type { Mode } from "@shared/storage/types"
-import { VSCodeButton, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { useEffect, useMemo, useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { ModelsServiceClient } from "@/services/grpc-client"
 import { parseAwsCredentialExports } from "@/utils/awsCredentialExport"
@@ -44,11 +47,11 @@ function TargetOption({ target, failed }: { target: BedrockTarget; failed: boole
 		.filter(Boolean)
 		.join(" · ")
 	return (
-		<option value={bedrockTargetKey(target)}>
+		<SelectItem textValue={target.displayName} value={bedrockTargetKey(target)}>
 			{target.displayName} — {target.invocationId}
 			{details ? ` · ${details}` : ""}
 			{failed ? " · test failed" : ""}
-		</option>
+		</SelectItem>
 	)
 }
 
@@ -57,7 +60,7 @@ function ErrorDetails({ error }: { error: BedrockDoctorError }) {
 		.filter((value) => value !== undefined)
 		.join(" · ")
 	return (
-		<div className="text-xs text-error">
+		<div className="text-sm leading-normal break-words text-error">
 			<div>{error.message}</div>
 			{metadata && <div>{metadata}</div>}
 			{error.suggestion && <div>{error.suggestion}</div>}
@@ -65,7 +68,7 @@ function ErrorDetails({ error }: { error: BedrockDoctorError }) {
 	)
 }
 
-const sectionClass = "rounded border border-solid border-(--vscode-panel-border) px-3 py-2"
+const sectionClass = "rounded-xs border border-solid border-border-panel px-2.5 py-2"
 const summaryClass = "cursor-pointer select-none"
 
 export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
@@ -207,8 +210,8 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 	return (
 		<div className="flex flex-col gap-3">
 			<div>
-				<h3 className="m-0">AWS Bedrock startup</h3>
-				<p className="text-description m-0 mt-1">
+				<h3 className="m-0">AWS Bedrock</h3>
+				<p className="text-sm text-description m-0 mt-1">
 					Validate the connection, choose a discovered model or profile, then confirm it before opening chat.
 				</p>
 			</div>
@@ -223,29 +226,39 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 				</summary>
 				<div className="mt-3 flex flex-col gap-3">
 					<DebouncedTextField
+						description="Used for regional model discovery and Bedrock Runtime."
 						initialValue={config.awsRegion || BEDROCK_DEFAULT_REGION}
 						onChange={(value) => saveConnection("awsRegion", value)}
 						placeholder={BEDROCK_DEFAULT_REGION}
 						style={{ width: "100%" }}>
 						Bedrock Runtime region
 					</DebouncedTextField>
-					<p className="text-xs text-description -mt-2 mb-0">
-						Used for both regional model discovery and Bedrock Runtime.
-					</p>
 
-					<label className="flex flex-col gap-1">
-						<span>AWS authentication</span>
-						<select
-							className="w-full bg-(--vscode-dropdown-background) text-(--vscode-dropdown-foreground) border border-solid border-(--vscode-dropdown-border) p-1"
-							onChange={(event) =>
-								saveConnection("awsAuthMode", event.target.value as "default" | "profile" | "access-key")
+					<Field>
+						<FieldLabel htmlFor="aws-auth-mode">AWS authentication</FieldLabel>
+						<Select
+							onValueChange={(value) =>
+								saveConnection("awsAuthMode", value as "default" | "profile" | "access-key")
 							}
 							value={authMode}>
-							<option value="default">Environment / IAM role</option>
-							<option value="profile">AWS profile / SSO</option>
-							<option value="access-key">Access keys</option>
-						</select>
-					</label>
+							<SelectTrigger className="w-full" id="aws-auth-mode">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectGroup>
+									<SelectItem value="default">Environment / IAM role</SelectItem>
+									<SelectItem value="profile">AWS profile / SSO</SelectItem>
+									<SelectItem value="access-key">Access keys</SelectItem>
+								</SelectGroup>
+							</SelectContent>
+						</Select>
+						{authMode === "default" && (
+							<FieldDescription>
+								Uses environment variables, EC2/ECS credentials, or another source in the standard AWS credential
+								chain.
+							</FieldDescription>
+						)}
+					</Field>
 
 					{authMode === "profile" && (
 						<DebouncedTextField
@@ -255,13 +268,6 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 							style={{ width: "100%" }}>
 							AWS profile
 						</DebouncedTextField>
-					)}
-
-					{authMode === "default" && (
-						<p className="text-xs text-description m-0">
-							Uses environment variables, EC2/ECS credentials, or another source in the standard AWS credential
-							chain.
-						</p>
 					)}
 
 					{authMode === "access-key" && (
@@ -283,7 +289,7 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 									<textarea
 										autoCapitalize="none"
 										autoCorrect="off"
-										className="box-border w-full resize-y bg-(--vscode-input-background) text-(--vscode-input-foreground) border border-solid border-(--vscode-input-border) p-2"
+										className="rounded-xs leading-normal box-border w-full resize-y bg-(--vscode-input-background) text-(--vscode-input-foreground) border border-solid border-(--vscode-input-border) p-2"
 										onChange={(event) => setCredentialExports(event.target.value)}
 										placeholder={
 											"export AWS_ACCESS_KEY_ID=…\nexport AWS_SECRET_ACCESS_KEY=…\nexport AWS_SESSION_TOKEN=…"
@@ -293,33 +299,35 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 										value={credentialExports}
 									/>
 								</label>
-								<VSCodeButton disabled={!credentialExports.trim()} onClick={saveExportedAccessKeys}>
+								<Button disabled={!credentialExports.trim()} onClick={saveExportedAccessKeys} size="sm">
 									Save pasted credentials
-								</VSCodeButton>
+								</Button>
 
 								{awsAccessKeysConfigured && (
 									<div className="flex flex-col gap-2">
 										<div className="flex flex-wrap gap-2">
-											<VSCodeButton
-												appearance="secondary"
+											<Button
 												onClick={() =>
 													revealedCredentials
 														? setRevealedCredentials(undefined)
 														: void revealSavedCredentials()
-												}>
+												}
+												size="sm"
+												variant="secondary">
 												{revealedCredentials ? "Hide saved credentials" : "Reveal saved credentials"}
-											</VSCodeButton>
+											</Button>
 											{revealedCredentials && (
-												<VSCodeButton
-													appearance="secondary"
-													onClick={() => void copyRevealedCredentials()}>
+												<Button
+													onClick={() => void copyRevealedCredentials()}
+													size="sm"
+													variant="secondary">
 													Copy exports
-												</VSCodeButton>
+												</Button>
 											)}
 										</div>
 										{revealedCredentials && (
 											<textarea
-												className="box-border w-full resize-y bg-(--vscode-input-background) text-(--vscode-input-foreground) border border-solid border-(--vscode-input-border) p-2 font-mono text-xs"
+												className="rounded-xs leading-normal box-border w-full resize-y bg-(--vscode-input-background) text-(--vscode-input-foreground) border border-solid border-(--vscode-input-border) p-2 font-mono text-xs"
 												readOnly
 												rows={4}
 												spellCheck={false}
@@ -334,41 +342,48 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 										Enter the three fields individually
 									</summary>
 									<div className="mt-2 flex flex-col gap-2">
-										<VSCodeTextField
-											onInput={(event) => setAccessKeyId((event.target as HTMLInputElement).value)}
-											placeholder="AKIA…"
-											style={{ width: "100%" }}
-											value={accessKeyId}>
-											Access key ID
-										</VSCodeTextField>
-										<VSCodeTextField
-											onInput={(event) => setSecretAccessKey((event.target as HTMLInputElement).value)}
-											placeholder="Secret access key"
-											style={{ width: "100%" }}
-											type="password"
-											value={secretAccessKey}>
-											Secret access key
-										</VSCodeTextField>
-										<VSCodeTextField
-											onInput={(event) => setSessionToken((event.target as HTMLInputElement).value)}
-											placeholder="Required for temporary credentials"
-											style={{ width: "100%" }}
-											type="password"
-											value={sessionToken}>
-											Session token
-										</VSCodeTextField>
-										<VSCodeButton
+										<Field>
+											<FieldLabel htmlFor="access-key-id">Access key ID</FieldLabel>
+											<Input
+												id="access-key-id"
+												onChange={(event) => setAccessKeyId(event.target.value)}
+												placeholder="AKIA…"
+												value={accessKeyId}
+											/>
+										</Field>
+										<Field>
+											<FieldLabel htmlFor="secret-access-key">Secret access key</FieldLabel>
+											<Input
+												id="secret-access-key"
+												onChange={(event) => setSecretAccessKey(event.target.value)}
+												placeholder="Secret access key"
+												type="password"
+												value={secretAccessKey}
+											/>
+										</Field>
+										<Field>
+											<FieldLabel htmlFor="session-token">Session token</FieldLabel>
+											<Input
+												id="session-token"
+												onChange={(event) => setSessionToken(event.target.value)}
+												placeholder="Required for temporary credentials"
+												type="password"
+												value={sessionToken}
+											/>
+										</Field>
+										<Button
 											disabled={!accessKeyId.trim() || !secretAccessKey.trim()}
-											onClick={saveAccessKeys}>
+											onClick={saveAccessKeys}
+											size="sm">
 											Save access keys
-										</VSCodeButton>
+										</Button>
 									</div>
 								</details>
 
 								{awsAccessKeysConfigured && (
-									<VSCodeButton appearance="secondary" onClick={() => void clearAccessKeys()}>
+									<Button onClick={() => void clearAccessKeys()} size="sm" variant="secondary">
 										Remove saved keys
-									</VSCodeButton>
+									</Button>
 								)}
 								{credentialStatus && <p className="text-xs text-description m-0">{credentialStatus}</p>}
 								<p className="text-xs text-description m-0">
@@ -391,16 +406,13 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 				</summary>
 				<div className="mt-3 flex flex-col gap-3">
 					<DebouncedTextField
+						description="Leave blank to use the regional AWS default. A custom endpoint must match the Runtime region above."
 						initialValue={config.awsBedrockEndpoint || ""}
 						onChange={(value) => saveConnection("awsBedrockEndpoint", value || undefined)}
 						placeholder="Optional Bedrock Runtime HTTPS endpoint"
 						style={{ width: "100%" }}>
 						Bedrock Runtime endpoint URL (optional)
 					</DebouncedTextField>
-					<p className="text-xs text-description -mt-2 mb-0">
-						Leave blank to use the regional AWS default. If supplied, this must match the Bedrock Runtime region
-						above.
-					</p>
 					<DebouncedTextField
 						initialValue={config.awsBedrockCaBundlePath || ""}
 						onChange={(value) => saveConnection("awsBedrockCaBundlePath", value || undefined)}
@@ -446,42 +458,46 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 
 				{showModelOptions && (foundationModels.length > 0 || inferenceProfiles.length > 0) && (
 					<>
-						<label className="flex flex-col gap-1">
-							<span>Available model or inference profile</span>
-							<select
-								className="w-full bg-(--vscode-dropdown-background) text-(--vscode-dropdown-foreground) border border-solid border-(--vscode-dropdown-border) p-1"
-								onChange={(event) => setPendingTargetKey(event.target.value)}
-								value={pendingTargetKey}>
-								<option disabled value="">
-									Choose a destination
-								</option>
-								{foundationModels.length > 0 && (
-									<optgroup label="Foundation models">
-										{foundationModels.map((target) => (
-											<TargetOption
-												failed={Boolean(bedrockStartup?.probeFailures[bedrockTargetKey(target)])}
-												key={bedrockTargetKey(target)}
-												target={target}
-											/>
-										))}
-									</optgroup>
-								)}
-								{inferenceProfiles.length > 0 && (
-									<optgroup label="Inference profiles">
-										{inferenceProfiles.map((target) => (
-											<TargetOption
-												failed={Boolean(bedrockStartup?.probeFailures[bedrockTargetKey(target)])}
-												key={bedrockTargetKey(target)}
-												target={target}
-											/>
-										))}
-									</optgroup>
-								)}
-							</select>
-						</label>
-						<VSCodeButton disabled={!pendingTarget || bedrockStartup?.progress.cancellable} onClick={confirmTarget}>
+						<Field>
+							<FieldLabel htmlFor="bedrock-model">Available model or inference profile</FieldLabel>
+							<Select onValueChange={setPendingTargetKey} value={pendingTargetKey}>
+								<SelectTrigger className="w-full" id="bedrock-model">
+									<SelectValue placeholder="Choose a destination">{pendingTarget?.displayName}</SelectValue>
+								</SelectTrigger>
+								<SelectContent>
+									{foundationModels.length > 0 && (
+										<SelectGroup>
+											<SelectLabel>Foundation models</SelectLabel>
+											{foundationModels.map((target) => (
+												<TargetOption
+													failed={Boolean(bedrockStartup?.probeFailures[bedrockTargetKey(target)])}
+													key={bedrockTargetKey(target)}
+													target={target}
+												/>
+											))}
+										</SelectGroup>
+									)}
+									{inferenceProfiles.length > 0 && (
+										<SelectGroup>
+											<SelectLabel>Inference profiles</SelectLabel>
+											{inferenceProfiles.map((target) => (
+												<TargetOption
+													failed={Boolean(bedrockStartup?.probeFailures[bedrockTargetKey(target)])}
+													key={bedrockTargetKey(target)}
+													target={target}
+												/>
+											))}
+										</SelectGroup>
+									)}
+								</SelectContent>
+							</Select>
+						</Field>
+						<Button
+							disabled={!pendingTarget || bedrockStartup?.progress.cancellable}
+							onClick={confirmTarget}
+							size="sm">
 							Confirm and test model
-						</VSCodeButton>
+						</Button>
 						<p className="text-xs text-description m-0">
 							Confirmation runs one small streaming compatibility test and may incur a very small Bedrock charge.
 						</p>
@@ -498,44 +514,44 @@ export const BedrockProvider = ({ showModelOptions }: BedrockProviderProps) => {
 				{bedrockStartup?.notice && <p className="text-xs text-description m-0">{bedrockStartup.notice}</p>}
 				{bedrockStartup?.error && !primaryErrorIsCatalogWarning && <ErrorDetails error={bedrockStartup.error} />}
 
-				<div className="flex flex-wrap gap-2">
-					<VSCodeButton
-						appearance="secondary"
-						onClick={() => void ModelsServiceClient.retryBedrockStartup(EmptyRequest.create())}>
+				<div
+					aria-label="Connection actions"
+					className="flex items-center gap-1 overflow-x-auto py-0.5 [&>button]:shrink-0"
+					role="group">
+					<Button
+						onClick={() => void ModelsServiceClient.retryBedrockStartup(EmptyRequest.create())}
+						size="xs"
+						variant="ghost">
 						Retry
-					</VSCodeButton>
-					<VSCodeButton
-						appearance="secondary"
-						onClick={() => void ModelsServiceClient.refreshBedrockDiscovery(EmptyRequest.create())}>
+					</Button>
+					<Button
+						onClick={() => void ModelsServiceClient.refreshBedrockDiscovery(EmptyRequest.create())}
+						size="xs"
+						variant="ghost">
 						Refresh
-					</VSCodeButton>
+					</Button>
 					{bedrockStartup?.progress.cancellable && (
-						<VSCodeButton
-							appearance="secondary"
-							onClick={() => void ModelsServiceClient.cancelBedrockStartup(EmptyRequest.create())}>
+						<Button
+							onClick={() => void ModelsServiceClient.cancelBedrockStartup(EmptyRequest.create())}
+							size="xs"
+							variant="ghost">
 							Cancel
-						</VSCodeButton>
+						</Button>
 					)}
-					<VSCodeButton
-						appearance="secondary"
-						onClick={() => void ModelsServiceClient.copyBedrockDiagnostics(EmptyRequest.create())}>
+					<Button
+						onClick={() => void ModelsServiceClient.copyBedrockDiagnostics(EmptyRequest.create())}
+						size="xs"
+						variant="ghost">
 						Copy diagnostics
-					</VSCodeButton>
-					<VSCodeButton
-						appearance="secondary"
-						onClick={() => void ModelsServiceClient.openBedrockDiagnosticLog(EmptyRequest.create())}>
+					</Button>
+					<Button
+						onClick={() => void ModelsServiceClient.openBedrockDiagnosticLog(EmptyRequest.create())}
+						size="xs"
+						variant="ghost">
 						Open log
-					</VSCodeButton>
+					</Button>
 				</div>
 			</div>
-
-			<details className="text-xs text-description">
-				<summary className={summaryClass}>Required IAM actions</summary>
-				<p className="m-0 mt-1">
-					bedrock:ListFoundationModels, bedrock:ListInferenceProfiles, bedrock:InvokeModel, and
-					bedrock:InvokeModelWithResponseStream.
-				</p>
-			</details>
 		</div>
 	)
 }

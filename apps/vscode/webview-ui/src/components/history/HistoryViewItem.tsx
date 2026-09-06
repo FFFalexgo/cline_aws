@@ -1,26 +1,14 @@
 import { HistoryItem } from "@shared/HistoryItem"
 import { StringRequest } from "@shared/proto/bedrock_coder/common"
-import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
-import {
-	ArrowDownIcon,
-	ArrowLeftIcon,
-	ArrowRightIcon,
-	ArrowUpIcon,
-	ChevronsDownUpIcon,
-	ChevronsUpDownIcon,
-	DownloadIcon,
-	StarIcon,
-	TrashIcon,
-} from "lucide-react"
-import { memo, useCallback, useMemo, useState } from "react"
+import { DownloadIcon, MessageSquareIcon, StarIcon, TrashIcon } from "lucide-react"
+import { memo } from "react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { TaskServiceClient } from "@/services/grpc-client"
-import { formatLargeNumber, formatSize } from "@/utils/format"
 
 type HistoryViewItemProps = {
 	item: HistoryItem
-	index: number
+	selectionMode: boolean
 	selectedItems: string[]
 	pendingFavoriteToggles: Record<string, boolean>
 	handleDeleteHistoryItem: (id: string) => void
@@ -30,200 +18,98 @@ type HistoryViewItemProps = {
 
 const HistoryViewItem = ({
 	item,
+	selectionMode,
 	pendingFavoriteToggles,
 	handleDeleteHistoryItem,
 	toggleFavorite,
 	handleHistorySelect,
 	selectedItems,
 }: HistoryViewItemProps) => {
-	const [expanded, setExpanded] = useState(false)
-
-	const isFavoritedItem = useMemo(
-		() => pendingFavoriteToggles[item.id] ?? item.isFavorited,
-		[item.id, item.isFavorited, pendingFavoriteToggles],
-	)
-
-	const handleShowTaskWithId = useCallback((id: string) => {
-		TaskServiceClient.showTaskWithId(StringRequest.create({ value: id })).catch((error) =>
-			console.error("Error showing task:", error),
-		)
-	}, [])
-
-	const formatDate = useCallback((timestamp: number) => {
-		const date = new Date(timestamp)
-		const today = new Date()
-		const isToday = today.toDateString() === date.toDateString()
-
-		return date
-			.toLocaleString(
-				"en-US",
-				isToday
-					? {
-							hour: "numeric",
-							minute: "2-digit",
-							hour12: true,
-						}
-					: {
-							month: "long",
-							day: "numeric",
-							hour: "numeric",
-							minute: "2-digit",
-							hour12: true,
-						},
-			)
-			.replace(", ", " ")
-			.replace(" at", ",")
-	}, [])
+	const isFavorited = pendingFavoriteToggles[item.id] ?? item.isFavorited ?? false
+	const isSelected = selectedItems.includes(item.id)
+	const date = new Date(item.ts)
+	const dateLabel =
+		date.toDateString() === new Date().toDateString()
+			? date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+			: date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 
 	return (
-		<div className="history-item cursor-pointer flex group mb-1 hover:bg-list-hover border-b border-accent/10" key={item.id}>
-			<VSCodeCheckbox
-				checked={selectedItems.includes(item.id)}
-				className="pl-3 pr-1 py-auto self-start mt-3"
-				onClick={(e) => {
-					e.preventDefault()
-					e.stopPropagation()
-					const checked = (e.target as HTMLInputElement).checked
-					handleHistorySelect(item.id, checked)
+		<div
+			className={cn(
+				"history-item group mx-2 flex items-center gap-1 rounded hover:bg-list-hover focus-within:bg-list-hover",
+				{ "bg-list-hover": isSelected },
+			)}>
+			{selectionMode && (
+				<input
+					aria-label={`Select ${item.task}`}
+					checked={isSelected}
+					className="ml-2 shrink-0 accent-button-background"
+					onChange={(event) => handleHistorySelect(item.id, event.target.checked)}
+					type="checkbox"
+				/>
+			)}
+			<Button
+				className="min-w-0 flex-1 justify-start gap-2 px-2 py-1.5"
+				onClick={() => {
+					if (selectionMode) {
+						handleHistorySelect(item.id, !isSelected)
+						return
+					}
+					TaskServiceClient.showTaskWithId(StringRequest.create({ value: item.id })).catch((error) =>
+						console.error("Error showing task:", error),
+					)
 				}}
-			/>
-
-			<div
-				className="flex flex-col gap-2 py-2 pl-2 pr-3 relative flex-grow min-w-0"
-				onClick={(e) => {
-					e.stopPropagation()
-					handleShowTaskWithId(item.id)
-				}}>
-				<div className="flex items-center gap-2">
-					<div className="line-clamp-1 overflow-hidden break-words whitespace-pre-wrap flex-1 min-w-0">
-						<span className="ph-no-capture">{item.task}</span>
-					</div>
-					{item.isLegacy && (
-						<span className="text-xs uppercase rounded px-1.5 py-0.5 bg-accent/20 text-description flex-shrink-0">
-							Legacy
-						</span>
-					)}
-					<div className="flex gap-2 flex-shrink-0">
+				title={item.task}
+				variant="ghost">
+				{isFavorited ? (
+					<StarIcon aria-label="Favorited" data-icon="inline-start" />
+				) : (
+					<MessageSquareIcon aria-hidden="true" data-icon="inline-start" />
+				)}
+				<span className="ph-no-capture min-w-0 truncate text-left">{item.task}</span>
+			</Button>
+			<div className="relative mr-2 flex h-7 w-20 shrink-0 items-center justify-end">
+				<time
+					className={cn("text-xs text-description", {
+						"group-hover:invisible group-focus-within:invisible": !selectionMode,
+					})}
+					dateTime={date.toISOString()}
+					title={date.toLocaleString()}>
+					{dateLabel}
+				</time>
+				{!selectionMode && (
+					<div className="absolute inset-0 flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
 						<Button
-							aria-label="Delete"
-							className="p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-							disabled={isFavoritedItem}
-							onClick={(e) => {
-								e.stopPropagation()
-								handleDeleteHistoryItem(item.id)
-							}}
-							variant="ghost">
-							<span className="flex items-center gap-1 text-xs">
-								<TrashIcon className="stroke-1" />
-							</span>
-						</Button>
-						<Button
-							aria-label={isFavoritedItem ? "Remove from favorites" : "Add to favorites"}
-							className="p-0"
+							aria-label={isFavorited ? "Remove from favorites" : "Add to favorites"}
 							disabled={pendingFavoriteToggles[item.id] !== undefined}
-							onClick={(e) => {
-								e.stopPropagation()
-								toggleFavorite(item.id, isFavoritedItem)
+							onClick={() => toggleFavorite(item.id, isFavorited)}
+							size="xs"
+							title={isFavorited ? "Remove from favorites" : "Add to favorites"}
+							variant="ghost">
+							<StarIcon data-icon="inline-start" />
+						</Button>
+						<Button
+							aria-label="Export conversation"
+							onClick={() => {
+								TaskServiceClient.exportTaskWithId(StringRequest.create({ value: item.id })).catch((error) =>
+									console.error("Failed to export task:", error),
+								)
 							}}
-							variant="icon">
-							<StarIcon
-								className={cn("opacity-70", {
-									"text-button-background  fill-button-background opacity-100": isFavoritedItem,
-								})}
-							/>
+							size="xs"
+							title="Export conversation"
+							variant="ghost">
+							<DownloadIcon data-icon="inline-start" />
+						</Button>
+						<Button
+							aria-label="Delete conversation"
+							disabled={isFavorited}
+							onClick={() => handleDeleteHistoryItem(item.id)}
+							size="xs"
+							title={isFavorited ? "Remove from favorites before deleting" : "Delete conversation"}
+							variant="ghost">
+							<TrashIcon data-icon="inline-start" />
 						</Button>
 					</div>
-				</div>
-
-				<Button
-					className="p-0"
-					onClick={(e) => {
-						e.stopPropagation()
-						setExpanded(!expanded)
-					}}
-					variant="icon">
-					<div className="flex items-center justify-between w-full">
-						<div className="text-description text-xs uppercase">{formatDate(item.ts)}</div>
-						<div className="self-end flex items-center text-xs">
-							<span className="text-description">${item.totalCost?.toFixed(4) ?? 0}</span>
-							{expanded ? (
-								<ChevronsDownUpIcon className="text-description" />
-							) : (
-								<ChevronsUpDownIcon className="text-description hidden opacity-0 group-hover:opacity-100 transition-opacity group-hover:block" />
-							)}
-						</div>
-					</div>
-				</Button>
-				{expanded && (
-					<Button
-						className="m-0 text-xs cursor-pointer p-2 bg-accent/10 w-full rounded-xs"
-						onClick={(e) => {
-							e.stopPropagation()
-							setExpanded(!expanded)
-						}}
-						variant="text">
-						<div className="flex flex-col gap-1 w-full text-xs">
-							<div className="flex items-center justify-between w-full">
-								<div className="flex items-center gap-1 flex-wrap w-full">
-									<div className="flex justify-between items-center w-full gap-1 text-xs">
-										<span className="font-medium text-description">Tokens:</span>
-										<div className="flex items-center gap-1 text-description text-xs">
-											<span className="flex items-center gap-1 text-description">
-												<ArrowUpIcon className="text-description !size-1" />
-												{formatLargeNumber(item.tokensIn || 0)}
-											</span>
-											<span className="flex items-center gap-1 text-description">
-												<ArrowDownIcon className="text-description !size-1" />
-												{formatLargeNumber(item.tokensOut || 0)}
-											</span>
-											{item.cacheWrites
-												? item.cacheWrites > 0 && (
-														<span className="flex items-center gap-1 text-description">
-															<ArrowRightIcon className="text-description !size-1" />
-															{formatLargeNumber(item.cacheWrites)}
-														</span>
-													)
-												: null}
-											{item.cacheReads
-												? item.cacheReads > 0 && (
-														<span className="flex items-center gap-1 text-description">
-															<ArrowLeftIcon className="text-description !size-1" />
-															{formatLargeNumber(item.cacheReads)}
-														</span>
-													)
-												: null}
-										</div>
-									</div>
-
-									{item.modelId && (
-										<div className="flex justify-between items-center w-full gap-1 text-xs">
-											<span className="font-medium text-description">Model:</span>
-											<span className="text-description">{item.modelId}</span>
-										</div>
-									)}
-
-									<div className="flex justify-between items-center w-full gap-1 text-xs">
-										<span className="font-medium text-description">Size:</span>
-										<span className="items-center gap-2 flex text-description">
-											{formatSize(item.size)}
-											<Button
-												aria-label="Export"
-												className="m-0 p-0"
-												onClick={(e) => {
-													e.stopPropagation()
-													TaskServiceClient.exportTaskWithId(
-														StringRequest.create({ value: item.id }),
-													).catch((err) => console.error("Failed to export task:", err))
-												}}
-												variant="ghost">
-												<DownloadIcon />
-											</Button>
-										</span>
-									</div>
-								</div>
-							</div>
-						</div>
-					</Button>
 				)}
 			</div>
 		</div>

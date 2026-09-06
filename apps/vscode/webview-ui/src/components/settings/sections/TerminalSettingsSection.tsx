@@ -1,6 +1,9 @@
 import { UpdateTerminalConnectionTimeoutResponse } from "@shared/proto/index.bedrock_coder"
-import { VSCodeCheckbox, VSCodeDropdown, VSCodeOption, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import React, { useState } from "react"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { PlatformType } from "@/config/platform.config"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { usePlatform } from "@/context/PlatformContext"
@@ -28,10 +31,7 @@ const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = ({ rende
 	const [inputValue, setInputValue] = useState((shellIntegrationTimeout / 1000).toString())
 	const [inputError, setInputError] = useState<string | null>(null)
 
-	const handleTimeoutChange = (event: Event) => {
-		const target = event.target as HTMLInputElement
-		const value = target.value
-
+	const handleTimeoutChange = (value: string) => {
 		setInputValue(value)
 
 		const seconds = Number.parseFloat(value)
@@ -64,139 +64,118 @@ const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = ({ rende
 		}
 	}
 
-	const handleTerminalReuseChange = (event: Event) => {
-		const target = event.target as HTMLInputElement
-		const checked = target.checked
-		updateSetting("terminalReuseEnabled", checked)
-	}
-
-	const handleExecutionModeChange = (event: Event) => {
-		const target = event.target as HTMLSelectElement
-		const value = target.value === "backgroundExec" ? "backgroundExec" : "vscodeTerminal"
-		updateSetting("vscodeTerminalExecutionMode", value)
-	}
-
-	// Use any to avoid type conflicts between Event and FormEvent
-	const handleDefaultTerminalProfileChange = (event: any) => {
-		const target = event.target as HTMLSelectElement
-		const profileId = target.value
-
-		// Save immediately using the consolidated updateSettings approach
-		updateSetting("defaultTerminalProfile", profileId || "default")
-	}
-
-	const profilesToShow = availableTerminalProfiles
-
 	return (
 		<div>
 			{renderSectionHeader("terminal")}
 			<Section>
-				<div className="mb-5" id="terminal-settings-section">
+				<FieldGroup id="terminal-settings-section">
 					{isVsCodePlatform && (
-						<div className="mb-4">
-							<label className="font-medium block mb-1" htmlFor="terminal-execution-mode">
-								Terminal Execution Mode
-							</label>
-							<VSCodeDropdown
-								className="w-full"
-								id="terminal-execution-mode"
-								onChange={(event) => handleExecutionModeChange(event as Event)}
+						<Field>
+							<FieldLabel htmlFor="terminal-execution-mode">Terminal Execution Mode</FieldLabel>
+							<Select
+								onValueChange={(value) =>
+									updateSetting(
+										"vscodeTerminalExecutionMode",
+										value === "backgroundExec" ? "backgroundExec" : "vscodeTerminal",
+									)
+								}
 								value={executionMode}>
-								<VSCodeOption value="vscodeTerminal">VS Code Terminal</VSCodeOption>
-								<VSCodeOption value="backgroundExec">Background Exec</VSCodeOption>
-							</VSCodeDropdown>
-							<p className="text-xs text-[var(--vscode-descriptionForeground)] mt-1">
-								Choose whether Bedrock Coder runs commands in the VS Code terminal or a background process.
-							</p>
-						</div>
+								<SelectTrigger
+									aria-describedby="execution-mode-description"
+									className="w-full"
+									id="terminal-execution-mode">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectGroup>
+										<SelectItem value="vscodeTerminal">VS Code Terminal</SelectItem>
+										<SelectItem value="backgroundExec">Background Exec</SelectItem>
+									</SelectGroup>
+								</SelectContent>
+							</Select>
+							<FieldDescription id="execution-mode-description">
+								Run commands in the VS Code terminal or a background process.
+							</FieldDescription>
+						</Field>
 					)}
-
 					{isVsCodePlatform && !isBackgroundExec && (
 						<>
-							<div className="mb-4">
-								<div className="mb-2">
-									<label className="font-medium block mb-1">Shell integration timeout (seconds)</label>
-									<div className="flex items-center">
-										<VSCodeTextField
-											className="w-full"
-											onBlur={handleInputBlur}
-											onChange={(event) => handleTimeoutChange(event as Event)}
-											placeholder="Enter timeout in seconds"
-											value={inputValue}
-										/>
-									</div>
-									{inputError && (
-										<div className="text-(--vscode-errorForeground) text-xs mt-1">{inputError}</div>
-									)}
-								</div>
-								<p className="text-xs text-(--vscode-descriptionForeground)">
-									Set how long Bedrock Coder waits for shell integration to activate before executing commands.
-									Increase this value if you experience terminal connection timeouts.
-								</p>
-							</div>
-
-							<div className="mb-4">
-								<div className="flex items-center mb-2">
-									<VSCodeCheckbox
-										checked={terminalReuseEnabled ?? true}
-										onChange={(event) => handleTerminalReuseChange(event as Event)}>
-										Enable aggressive terminal reuse
-									</VSCodeCheckbox>
-								</div>
-								<p className="text-xs text-(--vscode-descriptionForeground)">
-									When enabled, Bedrock Coder will reuse existing terminal windows that aren't in the current
-									working directory. Disable this if you experience issues with task lockout after a terminal
-									command.
-								</p>
+							<Field data-invalid={Boolean(inputError)}>
+								<FieldLabel htmlFor="shell-timeout">Shell integration timeout (seconds)</FieldLabel>
+								<Input
+									aria-describedby={inputError ? "shell-timeout-error" : "shell-timeout-description"}
+									aria-invalid={Boolean(inputError)}
+									id="shell-timeout"
+									inputMode="decimal"
+									onBlur={handleInputBlur}
+									onChange={(event) => handleTimeoutChange(event.target.value)}
+									value={inputValue}
+								/>
+								{inputError && (
+									<p className="m-0 text-sm text-error" id="shell-timeout-error" role="alert">
+										{inputError}
+									</p>
+								)}
+								<FieldDescription id="shell-timeout-description">
+									How long to wait for shell integration. Increase this if terminal connections time out.
+								</FieldDescription>
+							</Field>
+							<div className="flex items-start gap-3">
+								<Field className="flex-1">
+									<FieldLabel htmlFor="terminal-reuse">Enable aggressive terminal reuse</FieldLabel>
+									<FieldDescription id="terminal-reuse-description">
+										Reuse terminal windows outside the current working directory. Disable if terminal commands
+										cause task lockout.
+									</FieldDescription>
+								</Field>
+								<Switch
+									aria-describedby="terminal-reuse-description"
+									checked={terminalReuseEnabled ?? true}
+									className="mt-0.5"
+									id="terminal-reuse"
+									onCheckedChange={(checked) => updateSetting("terminalReuseEnabled", checked)}
+								/>
 							</div>
 						</>
 					)}
-
-					{/* Terminal choice affects both foreground and background execution mode. */}
-					<div className="mb-4">
-						<label className="font-medium block mb-1" htmlFor="default-terminal-profile">
-							Default Terminal Profile
-						</label>
-						<VSCodeDropdown
-							className="w-full"
-							id="default-terminal-profile"
-							onChange={handleDefaultTerminalProfileChange}
+					<Field>
+						<FieldLabel htmlFor="default-terminal-profile">Default Terminal Profile</FieldLabel>
+						<Select
+							onValueChange={(value) => updateSetting("defaultTerminalProfile", value)}
 							value={defaultTerminalProfile || "default"}>
-							{profilesToShow.map((profile) => (
-								<VSCodeOption key={profile.id} title={profile.description} value={profile.id}>
-									{profile.name}
-								</VSCodeOption>
-							))}
-						</VSCodeDropdown>
-						<p className="text-xs text-(--vscode-descriptionForeground) mt-1">
-							Select the default terminal Bedrock Coder will use. 'Default' uses your VSCode global setting.
-						</p>
-					</div>
-					<div className="mt-5 p-3 bg-(--vscode-textBlockQuote-background) rounded border border-(--vscode-textBlockQuote-border)">
-						<p className="text-[13px] m-0">
-							<strong>Having terminal issues?</strong> Check our{" "}
-							<a
-								className="text-(--vscode-textLink-foreground) underline hover:no-underline"
-								href="https://github.com/FFFalexgo/AWS_Bedrock_Coder#readme"
-								rel="noopener noreferrer"
-								target="_blank">
-								Terminal Quick Fixes
-							</a>{" "}
-							or the{" "}
-							<a
-								className="text-(--vscode-textLink-foreground) underline hover:no-underline"
-								href="https://github.com/FFFalexgo/AWS_Bedrock_Coder#readme"
-								rel="noopener noreferrer"
-								target="_blank">
-								Complete Troubleshooting Guide
-							</a>
-							.
-						</p>
-					</div>
-				</div>
+							<SelectTrigger
+								aria-describedby="terminal-profile-description"
+								className="w-full"
+								id="default-terminal-profile">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectGroup>
+									{!availableTerminalProfiles.some((profile) => profile.id === "default") && (
+										<SelectItem value="default">Default</SelectItem>
+									)}
+									{availableTerminalProfiles.map((profile) => (
+										<SelectItem key={profile.id} title={profile.description} value={profile.id}>
+											{profile.name}
+										</SelectItem>
+									))}
+								</SelectGroup>
+							</SelectContent>
+						</Select>
+						<FieldDescription id="terminal-profile-description">
+							Default uses your VS Code terminal setting.
+						</FieldDescription>
+					</Field>
+					<a
+						className="text-sm"
+						href="https://github.com/FFFalexgo/AWS_Bedrock_Coder#readme"
+						rel="noopener noreferrer"
+						target="_blank">
+						Terminal troubleshooting
+					</a>
+				</FieldGroup>
 			</Section>
 		</div>
 	)
 }
-
 export default TerminalSettingsSection

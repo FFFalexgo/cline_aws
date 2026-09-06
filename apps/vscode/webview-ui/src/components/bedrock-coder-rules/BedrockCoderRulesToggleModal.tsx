@@ -10,11 +10,13 @@ import {
 	ToggleSkillRequest,
 	ToggleWindsurfRuleRequest,
 } from "@shared/proto/bedrock_coder/file"
-import { VSCodeButton, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import { SlidersHorizontalIcon } from "lucide-react"
 import React, { useEffect, useRef, useState } from "react"
 import { useClickAway, useWindowSize } from "react-use"
 import styled from "styled-components"
 import PopupModalContainer from "@/components/common/PopupModalContainer"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { FileServiceClient } from "@/services/grpc-client"
@@ -348,14 +350,14 @@ const BedrockCoderRulesToggleModal: React.FC = () => {
 			<div className="inline-flex w-full items-center" ref={buttonRef}>
 				<Tooltip>
 					{!isVisible && <TooltipContent>Customize</TooltipContent>}
-					<TooltipTrigger>
-						<VSCodeButton
-							appearance="icon"
+					<TooltipTrigger asChild>
+						<Button
 							aria-label={isVisible ? "Hide Customize" : "Show Customize"}
-							className="p-0 m-0 flex items-center"
-							onClick={() => setIsVisible(!isVisible)}>
-							<i className="codicon codicon-law" style={{ fontSize: "12.5px" }} />
-						</VSCodeButton>
+							onClick={() => setIsVisible(!isVisible)}
+							size="icon"
+							variant="icon">
+							<SlidersHorizontalIcon data-icon="inline-start" />
+						</Button>
 					</TooltipTrigger>
 				</Tooltip>
 			</div>

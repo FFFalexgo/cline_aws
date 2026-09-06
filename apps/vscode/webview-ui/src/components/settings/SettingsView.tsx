@@ -1,9 +1,7 @@
 import type { ExtensionMessage } from "@shared/ExtensionMessage"
 import { ResetStateRequest } from "@shared/proto/bedrock_coder/state"
-import { CheckCheck, FlaskConical, Info, type LucideIcon, SlidersHorizontal, SquareTerminal, Wrench } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useEvent } from "react-use"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { cn } from "@/lib/utils"
 import { StateServiceClient } from "@/services/grpc-client"
@@ -17,226 +15,113 @@ import FeatureSettingsSection from "./sections/FeatureSettingsSection"
 import GeneralSettingsSection from "./sections/GeneralSettingsSection"
 import TerminalSettingsSection from "./sections/TerminalSettingsSection"
 
-const IS_DEV = process.env.IS_DEV
-
-// Tab definitions
-type SettingsTabID = "api-config" | "features" | "terminal" | "general" | "about" | "debug"
-interface SettingsTab {
-	id: SettingsTabID
-	name: string
-	tooltipText: string
-	headerText: string
-	icon: LucideIcon
-	hidden?: () => boolean
+const SETTINGS_TABS = [
+	{ id: "api-config", name: "API Configuration" },
+	{ id: "general", name: "General" },
+] as const
+const sectionTitles: Record<string, string> = {
+	general: "Language",
+	features: "Features",
+	terminal: "Terminal",
+	about: "About",
+	debug: "Developer tools",
 }
+const renderSectionHeader = (id: string) => <SectionHeader>{sectionTitles[id]}</SectionHeader>
+const tabForSection = (section?: string) => (!section || section === "api-config" ? "api-config" : "general")
 
-const SETTINGS_TABS: SettingsTab[] = [
-	{
-		id: "api-config",
-		name: "API Configuration",
-		tooltipText: "API Configuration",
-		headerText: "API Configuration",
-		icon: SlidersHorizontal,
-	},
-	{
-		id: "features",
-		name: "Features",
-		tooltipText: "Feature Settings",
-		headerText: "Feature Settings",
-		icon: CheckCheck,
-	},
-	{
-		id: "terminal",
-		name: "Terminal",
-		tooltipText: "Terminal Settings",
-		headerText: "Terminal Settings",
-		icon: SquareTerminal,
-	},
-	{
-		id: "general",
-		name: "General",
-		tooltipText: "General Settings",
-		headerText: "General Settings",
-		icon: Wrench,
-	},
-	{
-		id: "about",
-		name: "About",
-		tooltipText: "About Bedrock Coder",
-		headerText: "About",
-		icon: Info,
-	},
-	// Only show in dev mode
-	{
-		id: "debug",
-		name: "Debug",
-		tooltipText: "Debug Tools",
-		headerText: "Debug",
-		icon: FlaskConical,
-		hidden: () => !IS_DEV,
-	},
-]
-
-type SettingsViewProps = {
-	onDone: () => void
-	targetSection?: string
-}
-
-// Helper to render section header - moved outside component for better performance
-const renderSectionHeader = (tabId: string) => {
-	const tab = SETTINGS_TABS.find((t) => t.id === tabId)
-	if (!tab) {
-		return null
-	}
-
-	return (
-		<SectionHeader>
-			<div className="flex items-center gap-2">
-				<tab.icon className="w-4" />
-				<div>{tab.headerText}</div>
-			</div>
-		</SectionHeader>
-	)
-}
-
+type SettingsViewProps = { onDone: () => void; targetSection?: string }
 const SettingsView = ({ onDone, targetSection }: SettingsViewProps) => {
-	// Memoize to avoid recreation
-	const TAB_CONTENT_MAP: Record<SettingsTabID, React.FC<any>> = useMemo(
-		() => ({
-			"api-config": ApiConfigurationSection,
-			general: GeneralSettingsSection,
-			features: FeatureSettingsSection,
-			terminal: TerminalSettingsSection,
-			about: AboutSection,
-			debug: DebugSection,
-		}),
-		[],
-	) // Empty deps - these imports never change
-
 	const { version, environment, settingsInitialModelTab } = useExtensionState()
-	const [activeTab, setActiveTab] = useState<string>(targetSection || SETTINGS_TABS[0].id)
-
-	// Optimized message handler with early returns
-	const handleMessage = useCallback((event: MessageEvent) => {
-		const message: ExtensionMessage = event.data
-		if (message.type !== "grpc_response") {
-			return
-		}
-
-		const grpcMessage = message.grpc_response?.message
-		if (grpcMessage?.key !== "scrollToSettings") {
-			return
-		}
-
-		const tabId = grpcMessage.value
-		if (!tabId) {
-			return
-		}
-
-		// Check if valid tab ID
-		if (SETTINGS_TABS.some((tab) => tab.id === tabId)) {
-			setActiveTab(tabId)
-			return
-		}
-
-		// Fallback to element scrolling
-		requestAnimationFrame(() => {
-			const element = document.getElementById(tabId)
-			if (!element) {
-				return
-			}
-
-			element.scrollIntoView({ behavior: "smooth" })
-			element.style.transition = "background-color 0.5s ease"
-			element.style.backgroundColor = "var(--vscode-textPreformat-background)"
-
-			setTimeout(() => {
-				element.style.backgroundColor = "transparent"
-			}, 1200)
-		})
+	const [activeTab, setActiveTab] = useState(tabForSection(targetSection))
+	const [scrollTarget, setScrollTarget] = useState(targetSection)
+	const navigateToSection = useCallback((section: string) => {
+		setActiveTab(tabForSection(section))
+		setScrollTarget(section)
 	}, [])
-
+	useEffect(() => {
+		if (targetSection) navigateToSection(targetSection)
+	}, [targetSection, navigateToSection])
+	useEffect(() => {
+		if (!scrollTarget) return
+		const frame = requestAnimationFrame(() => {
+			const element = document.getElementById("settings-" + scrollTarget) ?? document.getElementById(scrollTarget)
+			element?.scrollIntoView({ block: "start" })
+			setScrollTarget(undefined)
+		})
+		return () => cancelAnimationFrame(frame)
+	}, [activeTab, scrollTarget])
+	const handleMessage = useCallback(
+		(event: MessageEvent) => {
+			const message: ExtensionMessage = event.data
+			if (message.type !== "grpc_response") return
+			const response = message.grpc_response?.message
+			if (response?.key === "scrollToSettings" && response.value) navigateToSection(response.value)
+		},
+		[navigateToSection],
+	)
 	useEvent("message", handleMessage)
-
-	// Memoized reset state handler
-	const handleResetState = useCallback(async (resetGlobalState?: boolean) => {
+	const handleResetState = useCallback(async (global?: boolean) => {
 		try {
-			await StateServiceClient.resetState(ResetStateRequest.create({ global: resetGlobalState }))
+			await StateServiceClient.resetState(ResetStateRequest.create({ global }))
 		} catch (error) {
 			console.error("Failed to reset state:", error)
 		}
 	}, [])
-
-	// Update active tab when targetSection changes
-	useEffect(() => {
-		if (targetSection) {
-			setActiveTab(targetSection)
-		}
-	}, [targetSection])
-
-	// Memoized tab item renderer
-	const renderTabItem = useCallback(
-		(tab: (typeof SETTINGS_TABS)[0]) => {
-			return (
-				<TabTrigger className="flex justify-baseline" data-testid={`tab-${tab.id}`} key={tab.id} value={tab.id}>
-					<Tooltip key={tab.id}>
-						<TooltipTrigger>
-							<div
-								className={cn(
-									"whitespace-nowrap overflow-hidden h-12 sm:py-3 box-border flex items-center border-l-2 border-transparent text-foreground opacity-70 bg-transparent hover:bg-list-hover p-4 cursor-pointer gap-2",
-									{
-										"opacity-100 border-l-2 border-l-foreground border-t-0 border-r-0 border-b-0 bg-selection":
-											activeTab === tab.id,
-									},
-								)}>
-								<tab.icon className="w-4 h-4" />
-								<span className="hidden sm:block">{tab.name}</span>
-							</div>
-						</TooltipTrigger>
-						<TooltipContent side="right">{tab.tooltipText}</TooltipContent>
-					</Tooltip>
-				</TabTrigger>
-			)
-		},
-		[activeTab],
-	)
-
-	// Memoized active content component
-	const ActiveContent = useMemo(() => {
-		const Component = TAB_CONTENT_MAP[activeTab as keyof typeof TAB_CONTENT_MAP]
-		if (!Component) {
-			return null
-		}
-
-		// Special props for specific components
-		const props: any = { renderSectionHeader }
-		if (activeTab === "debug") {
-			props.onResetState = handleResetState
-		} else if (activeTab === "about") {
-			props.version = version
-		} else if (activeTab === "api-config") {
-			props.initialModelTab = settingsInitialModelTab
-		}
-
-		return <Component {...props} />
-	}, [activeTab, handleResetState, settingsInitialModelTab, version, TAB_CONTENT_MAP])
-
 	return (
-		<Tab>
+		<Tab className="settings-view">
 			<ViewHeader environment={environment} onDone={onDone} title="Settings" />
-
-			<div className="flex flex-1 overflow-hidden">
-				<TabList
-					className="shrink-0 flex flex-col overflow-y-auto border-r border-sidebar-background"
-					onValueChange={setActiveTab}
-					value={activeTab}>
-					{SETTINGS_TABS.filter((tab) => !tab.hidden?.()).map(renderTabItem)}
-				</TabList>
-
-				<TabContent className="flex-1 overflow-auto">{ActiveContent}</TabContent>
-			</div>
+			<TabList
+				aria-label="Settings categories"
+				className="shrink-0 gap-1 border-b border-border-panel px-3 pb-2"
+				onValueChange={setActiveTab}
+				value={activeTab}>
+				{SETTINGS_TABS.map((tab) => (
+					<TabTrigger
+						aria-controls="settings-panel"
+						className={cn(
+							"min-h-7 cursor-pointer rounded-xs px-2 py-1 text-base text-description hover:bg-list-hover hover:text-foreground",
+							activeTab === tab.id && "bg-list-hover text-foreground font-medium",
+						)}
+						data-testid={"tab-" + tab.id}
+						id={"settings-tab-" + tab.id}
+						key={tab.id}
+						value={tab.id}>
+						{tab.name}
+					</TabTrigger>
+				))}
+			</TabList>
+			<TabContent
+				aria-labelledby={"settings-tab-" + activeTab}
+				className="min-w-0 pb-3"
+				id="settings-panel"
+				key={activeTab}
+				role="tabpanel"
+				tabIndex={0}>
+				{activeTab === "api-config" ? (
+					<ApiConfigurationSection initialModelTab={settingsInitialModelTab} />
+				) : (
+					<>
+						<div id="settings-general">
+							<GeneralSettingsSection renderSectionHeader={renderSectionHeader} />
+						</div>
+						<div id="settings-features">
+							<FeatureSettingsSection renderSectionHeader={renderSectionHeader} />
+						</div>
+						<div id="settings-terminal">
+							<TerminalSettingsSection renderSectionHeader={renderSectionHeader} />
+						</div>
+						{process.env.IS_DEV && (
+							<div id="settings-debug">
+								<DebugSection onResetState={handleResetState} renderSectionHeader={renderSectionHeader} />
+							</div>
+						)}
+						<div id="settings-about">
+							<AboutSection renderSectionHeader={renderSectionHeader} version={version} />
+						</div>
+					</>
+				)}
+			</TabContent>
 		</Tab>
 	)
 }
-
 export default SettingsView

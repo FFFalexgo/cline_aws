@@ -11,6 +11,26 @@ vscode-button::part(control):focus-visible {
 	outline-offset: 2px;
 }
 
+vscode-button::part(control) {
+	min-height: 28px;
+	padding: 2px 8px;
+	border-radius: 4px;
+	font-size: var(--text-base);
+	font-weight: 400;
+	line-height: 1.4;
+}
+
+vscode-button[appearance="icon"]::part(control) {
+	min-height: 28px;
+	min-width: 28px;
+}
+
+vscode-text-field::part(control),
+vscode-dropdown::part(control) {
+	border-radius: 4px;
+	font-size: var(--text-base);
+}
+
 /*
 Use vscode native scrollbar styles
 https://github.com/gitkraken/vscode-gitlens/blob/b1d71d4844523e8b2ef16f9e007068e91f46fd88/src/webviews/apps/home/home.scss
@@ -24,7 +44,7 @@ html {
 body {
 	margin: 0;
 	padding: 0;
-	line-height: 1.25;
+	line-height: 1.5;
 	height: 100%;
 	width: 100%;
 	background-color: var(--vscode-sideBar-background);
@@ -165,8 +185,8 @@ vscode-dropdown::part(listbox) {
 .mention-context-highlight-with-shadow,
 .slash-command-match-textarea-highlight {
 	font-family: var(--vscode-font-family);
-	font-size: var(--vscode-editor-font-size);
-	line-height: var(--vscode-editor-line-height);
+	font-size: var(--text-base);
+	line-height: 1.5;
 }
 
 .mention-context-textarea-highlight {
@@ -221,4 +241,10 @@ vscode-dropdown::part(listbox) {
 [data-slot="popover-content"] * {
 	animation: none !important;
 	transition: none !important;
+}
+
+.settings-view [role="tabpanel"] {
+	scrollbar-width: thin;
+	scrollbar-color: var(--vscode-scrollbarSlider-background, color-mix(in srgb, var(--vscode-foreground) 25%, transparent))
+		transparent;
 }

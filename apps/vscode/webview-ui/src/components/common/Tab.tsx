@@ -43,7 +43,32 @@ export const TabList = forwardRef<
 	)
 
 	return (
-		<div className={`flex ${className}`} ref={ref} role="tablist" {...props}>
+		<div
+			className={`flex ${className}`}
+			onKeyDown={(event) => {
+				const direction =
+					event.key === "ArrowRight" || event.key === "ArrowDown"
+						? 1
+						: event.key === "ArrowLeft" || event.key === "ArrowUp"
+							? -1
+							: 0
+				if (!direction && event.key !== "Home" && event.key !== "End") return
+				const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)'))
+				const current = tabs.indexOf(document.activeElement as HTMLButtonElement)
+				if (current < 0 || tabs.length === 0) return
+				event.preventDefault()
+				const next =
+					event.key === "Home"
+						? 0
+						: event.key === "End"
+							? tabs.length - 1
+							: (current + direction + tabs.length) % tabs.length
+				tabs[next].focus()
+				tabs[next].click()
+			}}
+			ref={ref}
+			role="tablist"
+			{...props}>
 			{React.Children.map(children, (child) => {
 				if (React.isValidElement(child)) {
 					// Make sure we're passing the correct props to the TabTrigger
@@ -70,7 +95,7 @@ export const TabTrigger = forwardRef<
 	return (
 		<button
 			aria-selected={isSelected}
-			className={`focus:outline-none ${className}`}
+			className={`focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${className}`}
 			data-value={value}
 			onClick={onSelect}
 			ref={ref}

@@ -1,8 +1,8 @@
 import type { BedrockCoderMessage } from "@shared/ExtensionMessage"
 import type { Mode } from "@shared/storage/types"
-import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import type React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Button } from "@/components/ui/button"
 import { useExtensionState } from "../../../../../context/ExtensionStateContext"
 import { ButtonActionType, getButtonConfigFromState } from "../../shared/buttonConfig"
 import type { ChatState, MessageHandlers } from "../../types/chatTypes"
@@ -128,24 +128,24 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({ task, messages, ch
 	const opacity = canInteract || isStreaming ? 1 : 0.5
 
 	return (
-		<div className="flex px-3.5" style={{ opacity }}>
+		<div className="flex gap-2 px-3 py-1" style={{ opacity }}>
 			{primaryText && primaryAction && (
-				<VSCodeButton
-					appearance="primary"
-					className={secondaryText ? "flex-1 mr-[6px]" : "flex-2"}
+				<Button
+					className="flex-1"
 					disabled={!canInteract}
-					onClick={() => handleActionClick(primaryAction, inputValue, selectedImages, selectedFiles)}>
+					onClick={() => handleActionClick(primaryAction, inputValue, selectedImages, selectedFiles)}
+					variant="default">
 					{primaryText}
-				</VSCodeButton>
+				</Button>
 			)}
 			{secondaryText && secondaryAction && (
-				<VSCodeButton
-					appearance="secondary"
-					className={primaryText ? "flex-1" : "flex-2"}
+				<Button
+					className="flex-1"
 					disabled={!canInteract}
-					onClick={() => handleActionClick(secondaryAction, inputValue, selectedImages, selectedFiles)}>
+					onClick={() => handleActionClick(secondaryAction, inputValue, selectedImages, selectedFiles)}
+					variant="secondary">
 					{secondaryText}
-				</VSCodeButton>
+				</Button>
 			)}
 		</div>
 	)

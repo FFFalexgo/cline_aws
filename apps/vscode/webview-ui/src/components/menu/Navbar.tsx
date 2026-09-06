@@ -51,7 +51,8 @@ export const Navbar = () => {
 
 	return (
 		<nav
-			className="flex-none inline-flex justify-end bg-transparent gap-2 mb-1 z-10 border-none items-center mr-4!"
+			aria-label="Main navigation"
+			className="flex-none inline-flex justify-end bg-transparent gap-1 px-3 py-1.5 items-center"
 			id="bedrock-coder-navbar-container">
 			{SETTINGS_TABS.map((tab) => (
 				<Tooltip key={`navbar-tooltip-${tab.id}`}>
@@ -59,13 +60,12 @@ export const Navbar = () => {
 					<TooltipTrigger asChild>
 						<Button
 							aria-label={tab.tooltip}
-							className="p-0 h-7"
 							data-testid={`tab-${tab.id}`}
 							key={`navbar-button-${tab.id}`}
 							onClick={() => tab.navigate()}
 							size="icon"
 							variant="icon">
-							<tab.icon className="stroke-1 [svg]:size-4" size={18} />
+							<tab.icon data-icon="inline-start" />
 						</Button>
 					</TooltipTrigger>
 				</Tooltip>

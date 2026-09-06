@@ -2,10 +2,12 @@ import { EmptyRequest } from "@shared/proto/bedrock_coder/common"
 import { McpServers } from "@shared/proto/bedrock_coder/mcp"
 import { convertProtoMcpServersToMcpServers } from "@shared/proto-conversions/mcp/mcp-server-conversion"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
+import { ServerIcon } from "lucide-react"
 import React, { useEffect, useRef, useState } from "react"
 import { useClickAway, useWindowSize } from "react-use"
 import PopupModalContainer from "@/components/common/PopupModalContainer"
 import ServersToggleList from "@/components/mcp/configuration/tabs/installed/ServersToggleList"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { McpServiceClient } from "@/services/grpc-client"
@@ -56,14 +58,14 @@ const ServersToggleModal: React.FC = () => {
 			<div className="inline-flex w-full items-center" ref={buttonRef}>
 				<Tooltip>
 					{!isVisible && <TooltipContent>Manage MCP Servers</TooltipContent>}
-					<TooltipTrigger>
-						<VSCodeButton
-							appearance="icon"
+					<TooltipTrigger asChild>
+						<Button
 							aria-label={isVisible ? "Hide MCP Servers" : "Show MCP Servers"}
-							className="p-0 m-0 flex items-center"
-							onClick={() => setIsVisible(!isVisible)}>
-							<i className="codicon codicon-server" style={{ fontSize: "12.5px" }} />
-						</VSCodeButton>
+							onClick={() => setIsVisible(!isVisible)}
+							size="icon"
+							variant="icon">
+							<ServerIcon data-icon="inline-start" />
+						</Button>
 					</TooltipTrigger>
 				</Tooltip>
 			</div>
