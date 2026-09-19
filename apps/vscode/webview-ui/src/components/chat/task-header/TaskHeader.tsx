@@ -21,7 +21,6 @@ interface TaskHeaderProps {
 	doesModelSupportPromptCache: boolean
 	cacheWrites?: number
 	cacheReads?: number
-	totalCost: number
 	lastApiReqTotalTokens?: number
 	onClose: () => void
 	onSendMessage?: (command: string, files: string[], images: string[]) => void
@@ -35,7 +34,6 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 	tokensOut,
 	cacheWrites,
 	cacheReads,
-	totalCost,
 	lastApiReqTotalTokens,
 	onClose,
 	onSendMessage,
@@ -82,7 +80,6 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 
 	// Simplified computed values
 	const { selectedModelInfo } = useNormalizedApiConfiguration(mode)
-	const isCostAvailable = totalCost !== undefined
 
 	// Event handlers
 	const toggleTaskExpanded = useCallback(() => setIsTaskExpanded(!isTaskExpanded), [setIsTaskExpanded, isTaskExpanded])
@@ -141,13 +138,6 @@ const TaskHeader: React.FC<TaskHeaderProps> = ({
 						)}
 					</div>
 					<div className="inline-flex items-center justify-end select-none shrink-0">
-						{isCostAvailable && (
-							<div
-								className="mx-1 px-1 py-0.25 rounded-full inline-flex shrink-0 text-badge-background bg-badge-foreground/80 items-center"
-								id="price-tag">
-								<span className="text-xs sm:text-sm">${totalCost?.toFixed(4)}</span>
-							</div>
-						)}
 						<NewTaskButton className={BUTTON_CLASS} onClick={onClose} />
 					</div>
 				</div>

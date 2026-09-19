@@ -10,7 +10,6 @@ interface TaskSectionProps {
 		totalTokensOut: number
 		totalCacheWrites?: number
 		totalCacheReads?: number
-		totalCost: number
 	}
 	lastApiReqTotalTokens?: number
 	selectedModelInfo: {
@@ -42,7 +41,6 @@ export const TaskSection: React.FC<TaskSectionProps> = ({
 			task={task}
 			tokensIn={apiMetrics.totalTokensIn}
 			tokensOut={apiMetrics.totalTokensOut}
-			totalCost={apiMetrics.totalCost}
 		/>
 	)
 }

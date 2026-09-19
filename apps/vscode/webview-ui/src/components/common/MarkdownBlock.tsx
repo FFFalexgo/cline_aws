@@ -1,21 +1,21 @@
-import { StringRequest } from "@shared/proto/bedrock_coder/common"
+import { parseFilePath } from "@shared/file-path"
 import { PlanActMode, TogglePlanActModeRequest } from "@shared/proto/bedrock_coder/state"
-import { SquareArrowOutUpRightIcon } from "lucide-react"
 import { marked } from "marked"
 import type { ComponentProps } from "react"
-import React, { memo, useEffect, useMemo, useRef, useState } from "react"
-import ReactMarkdown from "react-markdown"
+import React, { memo, useMemo, useRef } from "react"
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown"
 import rehypeHighlight, { Options } from "rehype-highlight"
 import remarkGfm from "remark-gfm"
 import type { Node } from "unist"
 import { visit } from "unist-util-visit"
 import MermaidBlock from "@/components/common/MermaidBlock"
-import { Button } from "@/components/ui/button"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { cn } from "@/lib/utils"
-import { FileServiceClient, StateServiceClient } from "@/services/grpc-client"
+import { StateServiceClient } from "@/services/grpc-client"
+import { remarkWorkspacePaths } from "@/utils/remark-workspace-paths"
 import { WithCopyButton } from "./CopyButton"
 import UnsafeImage from "./UnsafeImage"
+import { WorkspacePathLink } from "./WorkspacePathLink"
 
 function parseMarkdownIntoBlocks(markdown: string): string[] {
 	try {
@@ -40,16 +40,30 @@ const MemoizedMarkdownBlock = memo(
 						}
 						return <PreWithCopyButton {...preProps}>{children}</PreWithCopyButton>
 					},
-					code: (props: ComponentProps<"code"> & { [key: string]: any }) => {
+					code: ({ node: _node, ...props }: ComponentProps<"code"> & { [key: string]: any }) => {
 						const className = props.className || ""
 						if (className.includes("language-mermaid")) {
 							const codeText = String(props.children || "")
 							return <MermaidBlock code={codeText} />
 						}
 
-						// Use the async file check component for potential file paths
-						return <InlineCodeWithFileCheck {...props} />
+						const reference = props["data-workspace-path"]
+						return reference ? (
+							<WorkspacePathLink reference={reference}>
+								<code {...props} />
+							</WorkspacePathLink>
+						) : (
+							<code {...props} />
+						)
 					},
+					a: ({ node: _node, href, children, ...props }) =>
+						href && parseFilePath(href) ? (
+							<WorkspacePathLink reference={href}>{children}</WorkspacePathLink>
+						) : (
+							<a {...props} href={href}>
+								{children}
+							</a>
+						),
 					strong: (props: ComponentProps<"strong">) => {
 						// Check if this is an "Act Mode" strong element by looking for the keyboard shortcut
 						// Handle both string children and array of children cases
@@ -82,7 +96,7 @@ const MemoizedMarkdownBlock = memo(
 					remarkPreventBoldFilenames,
 					remarkUrlToLink,
 					remarkHighlightActMode,
-					remarkMarkPotentialFilePaths,
+					remarkWorkspacePaths,
 					() => {
 						return (tree: any) => {
 							visit(tree, "code", (node: any) => {
@@ -94,7 +108,21 @@ const MemoizedMarkdownBlock = memo(
 							})
 						}
 					},
-				]}>
+				]}
+				urlTransform={(url, key) => {
+					if (key === "href") {
+						let reference = url
+						if (!/^file:\/\//i.test(url)) {
+							try {
+								reference = decodeURIComponent(url)
+							} catch {
+								// Keep literal percent signs in paths that are not URI-encoded.
+							}
+						}
+						if (parseFilePath(reference)) return reference
+					}
+					return defaultUrlTransform(url)
+				}}>
 				{content}
 			</ReactMarkdown>
 		)
@@ -163,6 +191,7 @@ const remarkUrlToLink = () => {
 	return (tree: Node) => {
 		// Visit all "text" nodes in the markdown AST (Abstract Syntax Tree)
 		visit(tree, "text", (node: any, index, parent) => {
+			if (parent?.type === "link" || parent?.type === "linkReference") return
 			const urlRegex = /https?:\/\/[^\s<>)"]+/g
 			const matches = node.value.match(urlRegex)
 			if (!matches) {
@@ -334,81 +363,6 @@ const PreWithCopyButton = ({ children, ...preProps }: React.HTMLAttributes<HTMLP
 			</pre>
 		</WithCopyButton>
 	)
-}
-
-// Regex to detect potential file paths (used in both remark plugin and component)
-const FILE_PATH_REGEX = /^(?!\/)[\w\-./]+(?<!\/)$/
-
-/**
- * Custom remark plugin that marks potential file paths in inline code blocks
- * This is synchronous - actual file existence checking happens in the React component
- */
-const remarkMarkPotentialFilePaths = () => {
-	return (tree: Node) => {
-		visit(tree, "inlineCode", (node: Node & { value: string; data?: any }) => {
-			if (FILE_PATH_REGEX.test(node.value) && !node.value.includes("\n")) {
-				// Mark as potential file path - actual checking happens in React component
-				node.data = node.data || {}
-				node.data.hProperties = node.data.hProperties || {}
-				node.data.hProperties["data-potential-file-path"] = "true"
-			}
-		})
-	}
-}
-
-/**
- * Component that renders inline code and checks if it's a valid file path asynchronously
- * Shows the code immediately, then adds the file link icon when confirmed
- */
-const InlineCodeWithFileCheck: React.FC<ComponentProps<"code"> & { [key: string]: any }> = (props) => {
-	const [isFilePath, setIsFilePath] = useState<boolean | null>(null)
-	const filePath = typeof props.children === "string" ? props.children : String(props.children || "")
-	const isPotentialFilePath = props["data-potential-file-path"] === "true"
-
-	useEffect(() => {
-		if (!isPotentialFilePath) {
-			return
-		}
-
-		let cancelled = false
-
-		// Check file existence asynchronously
-		FileServiceClient.ifFileExistsRelativePath(StringRequest.create({ value: filePath }))
-			.then((exists) => {
-				if (!cancelled) {
-					setIsFilePath(exists.value)
-				}
-			})
-			.catch((err) => {
-				console.debug(`Failed to check file existence for ${filePath}:`, err)
-				if (!cancelled) {
-					setIsFilePath(false)
-				}
-			})
-
-		return () => {
-			cancelled = true
-		}
-	}, [filePath, isPotentialFilePath])
-
-	// If confirmed as a file path, render as clickable button
-	if (isFilePath) {
-		return (
-			<Button
-				className="p-0 ml-0.5 leading-none align-middle transition-opacity text-preformat gap-0.5 inline text-left"
-				onClick={() => FileServiceClient.openFileRelativePath({ value: filePath })}
-				size="icon"
-				title={`Open ${filePath} in editor`}
-				type="button"
-				variant="icon">
-				<code {...props} />
-				<SquareArrowOutUpRightIcon className="inline align-middle ml-0.5" />
-			</Button>
-		)
-	}
-
-	// Otherwise render as regular code (shows immediately, before file check completes)
-	return <code {...props} />
 }
 
 const MarkdownBlock = memo(({ markdown, compact, showCursor }: MarkdownBlockProps) => {

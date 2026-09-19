@@ -3,6 +3,12 @@
 Bedrock Coder is a local-first coding agent powered exclusively by Amazon
 Bedrock.
 
+Requires VS Code 1.106 or newer. Bedrock Coder opens in the Secondary Side Bar (on the right in the default layout), alongside Copilot Chat when installed, so the Explorer folder tree can stay visible on the left. Copilot is not required.
+
+If an existing workspace keeps Bedrock Coder on the left, right-click its icon or view title and choose **Move To → Secondary Side Bar**. VS Code remembers your chosen position. To show or hide the right sidebar, use **View → Appearance → Secondary Side Bar**.
+
+Click a file or folder path in chat to reveal it in VS Code's Explorer tree. Existing workspace paths are linked in inline code, Markdown links, and plain text; absolute paths and line-number suffixes are supported too.
+
 ## AWS Bedrock startup
 
 The VS Code extension validates its AWS connection on activation, discovers

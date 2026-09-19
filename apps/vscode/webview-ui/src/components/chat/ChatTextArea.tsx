@@ -1297,7 +1297,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							fontSize: "var(--text-base)",
 							lineHeight: 1.5,
 							borderRadius: 4,
-							padding: `9px 40px ${9 + thumbnailsHeight}px 9px`,
+							padding: `9px 9px ${9 + thumbnailsHeight}px 9px`,
 						}}
 					/>
 					<DynamicTextArea
@@ -1351,7 +1351,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							borderTop: 0,
 							borderBottom: `${thumbnailsHeight}px solid transparent`,
 							borderColor: "transparent",
-							padding: "9px 40px 9px 9px",
+							padding: "9px",
 							cursor: "text",
 							flex: 1,
 							zIndex: 1,
@@ -1364,7 +1364,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						value={inputValue}
 					/>
 					{!inputValue && selectedImages.length === 0 && selectedFiles.length === 0 && (
-						<div className="text-xs absolute bottom-4 left-4 right-14 text-description truncate pointer-events-none z-1">
+						<div className="text-xs absolute bottom-4 left-4 right-4 text-description truncate pointer-events-none z-1">
 							@ context · / commands
 						</div>
 					)}
@@ -1380,23 +1380,11 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								paddingTop: 4,
 								bottom: 14,
 								left: 22,
-								right: 47, // (54 + 9) + 4 extra padding
+								right: 22,
 								zIndex: 2,
 							}}
 						/>
 					)}
-					<Button
-						aria-label="Send message"
-						className="absolute bottom-3 right-3 z-10"
-						data-testid="send-button"
-						disabled={sendingDisabled}
-						onClick={() => {
-							onSend()
-						}}
-						size="icon"
-						title="Send message">
-						<ArrowUpIcon data-icon="inline-start" />
-					</Button>
 				</div>
 				<div className="flex justify-between items-center gap-2 px-2 pb-2">
 					<div className="flex-1 min-w-0">
@@ -1468,6 +1456,7 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						<TooltipTrigger asChild>
 							<Button
 								aria-label={`Mode: ${mode === "plan" ? "Plan" : "Act"}. Switch to ${mode === "plan" ? "Act" : "Plan"}`}
+								className="shrink-0"
 								data-testid="mode-switch"
 								onBlur={() => setShownTooltipMode(null)}
 								onClick={onModeToggle}
@@ -1480,6 +1469,16 @@ const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							</Button>
 						</TooltipTrigger>
 					</Tooltip>
+					<Button
+						aria-label="Send message"
+						className="shrink-0"
+						data-testid="send-button"
+						disabled={sendingDisabled}
+						onClick={onSend}
+						size="xs"
+						title="Send message">
+						<ArrowUpIcon data-icon="inline-start" />
+					</Button>
 				</div>
 			</div>
 		)

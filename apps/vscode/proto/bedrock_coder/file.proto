@@ -67,6 +67,12 @@ service FileService {
   // Open a file in editor by a relative path
   rpc openFileRelativePath(StringRequest) returns (Empty);
 
+  // Resolves a chat path to an existing workspace file or directory, or an empty string.
+  rpc resolvePath(StringRequest) returns (String);
+
+  // Reveals a workspace file or directory in the IDE's Explorer tree.
+  rpc revealPathInExplorer(StringRequest) returns (Empty);
+
   // Opens or creates a focus chain checklist markdown file for editing
   rpc openFocusChainFile(StringRequest) returns (Empty);
 
