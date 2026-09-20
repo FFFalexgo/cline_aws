@@ -1,11 +1,10 @@
 import { expect } from "@playwright/test"
-import { E2ETestHelper, e2e } from "./utils/helpers"
+import { e2e } from "./utils/helpers"
 
 e2e("Chat - accepts input and switches between modes", async ({ page, sidebar }) => {
-	// Urgent AWS setup notifications can appear even with Do Not Disturb enabled.
-	await page.addLocatorHandler(page.locator(".notifications-toasts.visible"), async () => {
-		await E2ETestHelper.runCommandPalette(page, "Notifications: Clear All Notifications")
-	})
+	// Startup notifications can cover the right sidebar even with Do Not Disturb enabled.
+	const clearNotification = page.locator(".notifications-toasts.visible").getByRole("button", { name: /^Clear Notification/ })
+	await page.addLocatorHandler(clearNotification.first(), async (button) => button.click(), { noWaitAfter: true })
 
 	const inputbox = sidebar.getByTestId("chat-input")
 	await expect(inputbox).toBeVisible()
