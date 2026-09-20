@@ -2,6 +2,11 @@ import { expect } from "@playwright/test"
 import { E2ETestHelper, e2e } from "./utils/helpers"
 
 e2e("Chat - accepts input and switches between modes", async ({ page, sidebar }) => {
+	// Urgent AWS setup notifications can appear even with Do Not Disturb enabled.
+	await page.addLocatorHandler(page.locator(".notifications-toasts.visible"), async () => {
+		await E2ETestHelper.runCommandPalette(page, "Notifications: Clear All Notifications")
+	})
+
 	const inputbox = sidebar.getByTestId("chat-input")
 	await expect(inputbox).toBeVisible()
 
@@ -10,7 +15,6 @@ e2e("Chat - accepts input and switches between modes", async ({ page, sidebar })
 	await expect(modeButton).toHaveAccessibleName("Mode: Act. Switch to Plan")
 	await modeButton.click()
 	await expect(modeButton).toHaveAccessibleName("Mode: Plan. Switch to Act")
-	await E2ETestHelper.runCommandPalette(page, "Notifications: Clear All Notifications")
 
 	// Slash commands preserve following text.
 	await expect(inputbox).toHaveValue("")
