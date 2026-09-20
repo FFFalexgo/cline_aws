@@ -1,20 +1,16 @@
 import { expect } from "@playwright/test"
-import { e2e } from "./utils/helpers"
+import { E2ETestHelper, e2e } from "./utils/helpers"
 
-e2e("Chat - accepts input and switches between modes", async ({ sidebar }) => {
+e2e("Chat - accepts input and switches between modes", async ({ page, sidebar }) => {
 	const inputbox = sidebar.getByTestId("chat-input")
 	await expect(inputbox).toBeVisible()
 
 	// Makes sure the act and plan switches are working correctly.
-	const actButton = sidebar.getByRole("switch", { name: "Act" })
-	const planButton = sidebar.getByRole("switch", { name: "Plan" })
-
-	await expect(actButton).toHaveAttribute("aria-checked", "true")
-	await expect(planButton).not.toHaveAttribute("aria-checked", "true")
-
-	await planButton.click()
-	await expect(planButton).toHaveAttribute("aria-checked", "true")
-	await expect(actButton).not.toHaveAttribute("aria-checked", "true")
+	const modeButton = sidebar.getByTestId("mode-switch")
+	await expect(modeButton).toHaveAccessibleName("Mode: Act. Switch to Plan")
+	await modeButton.click()
+	await expect(modeButton).toHaveAccessibleName("Mode: Plan. Switch to Act")
+	await E2ETestHelper.runCommandPalette(page, "Notifications: Clear All Notifications")
 
 	// Slash commands preserve following text.
 	await expect(inputbox).toHaveValue("")

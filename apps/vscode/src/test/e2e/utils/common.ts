@@ -8,15 +8,15 @@ export const openTab = async (_page: Page, tabName: string) => {
 }
 
 export const addSelectedCodeToBedrockCoderWebview = async (_page: Page) => {
-	await _page.locator("div:nth-child(4) > span > span").first().click()
-	await _page.getByRole("textbox", { name: "The editor is not accessible" }).press("ControlOrMeta+a")
+	await _page.locator(".monaco-editor .view-lines").first().click()
+	await _page.keyboard.press("ControlOrMeta+a")
 
 	// Open Code Actions via keyboard for cross-platform reliability
 	await _page.keyboard.press("ControlOrMeta+.")
 
 	// Target the explicit action instead of pressing Enter on the first item.
 	// The first item can vary by platform or diagnostics.
-	const addToBedrockCoder = _page.getByText(/Add to Bedrock Coder/i)
+	const addToBedrockCoder = _page.getByText("Add to Bedrock Coder", { exact: true })
 	await addToBedrockCoder.waitFor({ state: "visible" })
 	// For whatever reason, we need to move the mouse to make the context menu item clickable
 	await _page.mouse.move(10, 10)

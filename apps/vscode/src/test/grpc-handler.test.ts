@@ -39,6 +39,7 @@ describe("GrpcHandler Recording Middleware", () => {
 		builderStub = {
 			enableIf: sinon.stub().returnsThis(),
 			withLogFileHandler: sinon.stub().returnsThis(),
+			withFilters: sinon.stub().returnsThis(),
 			build: sinon.stub().returns(recorderStub),
 		}
 

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import simpleGit from "simple-git"
@@ -15,7 +15,7 @@ describe("worktree mutation safety", () => {
 	})
 
 	test("allows a reviewed managed creation and rejects deletion of the repository root", async () => {
-		repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "bedrock-coder-worktree-safety-"))
+		repositoryRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), "bedrock-coder-worktree-safety-")))
 		const git = simpleGit(repositoryRoot)
 		await git.init()
 		await git.addConfig("user.name", "Bedrock Coder Test")

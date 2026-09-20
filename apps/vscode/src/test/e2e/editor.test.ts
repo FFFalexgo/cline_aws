@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test"
-import { addSelectedCodeToBedrockCoderWebview, openTab, toggleNotifications } from "./utils/common"
+import { addSelectedCodeToBedrockCoderWebview } from "./utils/common"
 import { E2E_WORKSPACE_TYPES, e2e } from "./utils/helpers"
 
 e2e.describe("Code Actions and Editor Panel", () => {
@@ -10,12 +10,11 @@ e2e.describe("Code Actions and Editor Panel", () => {
 			// Sidebar - input should start empty
 			const sidebarInput = sidebar.getByTestId("chat-input")
 			await sidebarInput.click()
-			await toggleNotifications(page)
 			await expect(sidebarInput).toBeEmpty()
 
 			// Open file tree and select code from file
-			await openTab(page, "Explorer ")
-			await page.getByRole("treeitem", { name: "index.html" }).locator("a").click()
+			await page.keyboard.press("ControlOrMeta+Shift+e")
+			await page.getByRole("treeitem", { name: "index.html", exact: true }).dblclick()
 			await expect(sidebarInput).not.toBeFocused()
 
 			// Sidebar should be opened and visible after adding code to BedrockCoder

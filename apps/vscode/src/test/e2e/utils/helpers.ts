@@ -254,21 +254,16 @@ export class E2ETestHelper {
 	}
 
 	public static async openBedrockCoderSidebar(page: Page): Promise<void> {
-		await page
-			.getByRole("tab", { name: /Bedrock Coder/ })
-			.locator("a")
-			.click()
+		await E2ETestHelper.runCommandPalette(page, "Bedrock Coder: Focus on View")
 	}
 
 	public static async runCommandPalette(page: Page, command: string): Promise<void> {
-		const editorMenu = page.locator("li").filter({ hasText: "[Extension Development Host]" }).first()
-		await editorMenu.click({ delay: 100 })
-		const editorSearchBar = page.getByRole("textbox", {
-			name: "Search files by name (append",
-		})
-		await editorSearchBar.click({ delay: 100 }) // Ensure focus
-		await editorSearchBar.fill(`>${command}`)
-		await page.keyboard.press("Enter")
+		await page.locator(".monaco-workbench").waitFor({ state: "visible" })
+		await page.keyboard.press("ControlOrMeta+Shift+p")
+		const input = page.locator(".quick-input-widget input")
+		await input.fill(`>${command}`)
+		await page.getByRole("option", { name: command, exact: true }).waitFor({ state: "visible" })
+		await input.press("Enter")
 	}
 
 	// Clear cached frame when needed
@@ -378,12 +373,11 @@ export const e2e = test
 						"--skip-welcome",
 						"--skip-release-notes",
 						`--user-data-dir=${userDataDir}`,
-						`--install-extension=${path.join(E2ETestHelper.CODEBASE_ROOT_DIR, "dist", "e2e.vsix")}`,
 						`--extensionDevelopmentPath=${E2ETestHelper.CODEBASE_ROOT_DIR}`,
 						workspacePath,
 					],
 				})
-				await E2ETestHelper.waitUntil(() => app.windows().length > 0)
+				await app.firstWindow({ timeout: 45_000 })
 				return app
 			})
 		},
@@ -444,6 +438,7 @@ export const e2e = test
 	})
 	.extend<{ sidebar: Frame }>({
 		sidebar: async ({ page, helper }, use) => {
+			await E2ETestHelper.runCommandPalette(page, "Notifications: Toggle Do Not Disturb Mode")
 			await E2ETestHelper.openBedrockCoderSidebar(page)
 			const sidebar = await helper.getSidebar(page)
 			const settingsDoneButton = sidebar.getByRole("button", { name: "Done", exact: true })

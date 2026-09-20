@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
 import {
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -52,7 +54,9 @@ describe("applyCheckpointToWorktree", () => {
 	let outsideDir = "";
 
 	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "checkpoint-restore-"));
+		dir = realpathSync.native(
+			mkdtempSync(join(tmpdir(), "checkpoint-restore-")),
+		);
 		outsideDir = mkdtempSync(join(tmpdir(), "checkpoint-restore-outside-"));
 		mkdirSync(dir, { recursive: true });
 		createRepo(dir);
@@ -180,7 +184,8 @@ describe("applyCheckpointToWorktree", () => {
 				},
 				{ approved: true },
 			),
-		).rejects.toThrow(/parent is a symlink/);
+		).rejects.toThrow(/symlink/);
+		expect(lstatSync(nestedDir).isSymbolicLink()).toBe(true);
 		expect(readFileSync(join(outsideDir, "target.txt"), "utf8")).toBe(
 			"outside\n",
 		);
