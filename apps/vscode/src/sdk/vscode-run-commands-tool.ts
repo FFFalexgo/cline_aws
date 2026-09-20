@@ -42,6 +42,9 @@ import type { SdkForegroundCommandCoordinator } from "./sdk-foreground-command-c
 type ShellCommand = string | StructuredCommandInput
 type VscodeTerminalExecutionMode = "vscodeTerminal" | "backgroundExec"
 
+/** Allow background builds, installs, and test runs up to five minutes. */
+export const VSCODE_BACKGROUND_RUN_COMMANDS_TIMEOUT_MS = 5 * 60 * 1000
+
 /** Foreground VS Code terminals cannot be forcibly terminated; give long-running commands room to finish. */
 export const VSCODE_FOREGROUND_RUN_COMMANDS_TIMEOUT_MS = 60 * 60 * 1000
 
@@ -60,7 +63,7 @@ export interface VscodeRunCommandsToolOptions {
 	cwd: string
 	/** Lazy factory for the VscodeTerminalManager. Called once on first foreground use. */
 	getTerminalManager: () => VscodeTerminalManager
-	/** Timeout passed to the SDK shell tool wrapper. */
+	/** Per-command timeout shared by the tool wrapper and background process. */
 	bashTimeoutMs?: number
 	/** Terminal execution mode captured when this session's tool set is built. */
 	vscodeTerminalExecutionMode?: VscodeTerminalExecutionMode
@@ -487,9 +490,14 @@ function takeShellSnapshot(): ShellSnapshot {
  */
 export function createVscodeRunCommandsTool(options: VscodeRunCommandsToolOptions): AgentTool {
 	const state = { snapshot: takeShellSnapshot() }
-	return createShellTool(createVscodeShellExecutor(options, state), {
+	const timeoutMs =
+		options.bashTimeoutMs ??
+		(options.vscodeTerminalExecutionMode === "vscodeTerminal"
+			? VSCODE_FOREGROUND_RUN_COMMANDS_TIMEOUT_MS
+			: VSCODE_BACKGROUND_RUN_COMMANDS_TIMEOUT_MS)
+	return createShellTool(createVscodeShellExecutor(options, state, timeoutMs), {
 		cwd: options.cwd,
-		bashTimeoutMs: options.bashTimeoutMs,
+		bashTimeoutMs: timeoutMs,
 		shell: () => {
 			state.snapshot = takeShellSnapshot()
 			return state.snapshot.shell
@@ -497,7 +505,11 @@ export function createVscodeRunCommandsTool(options: VscodeRunCommandsToolOption
 	})
 }
 
-function createVscodeShellExecutor(options: VscodeRunCommandsToolOptions, state: { snapshot: ShellSnapshot }): ShellExecutor {
+function createVscodeShellExecutor(
+	options: VscodeRunCommandsToolOptions,
+	state: { snapshot: ShellSnapshot },
+	timeoutMs: number,
+): ShellExecutor {
 	const { cwd, getTerminalManager } = options
 	const executionMode = options.vscodeTerminalExecutionMode ?? "backgroundExec"
 
@@ -522,6 +534,7 @@ function createVscodeShellExecutor(options: VscodeRunCommandsToolOptions, state:
 				bgExecutorShell = shell
 				bgExecutor = createShellExecutor({
 					shell,
+					timeoutMs,
 					// Set SHELL env to match the shell we're spawning so child
 					// processes see the correct value instead of the inherited parent's.
 					env: { SHELL: shell },

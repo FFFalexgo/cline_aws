@@ -80,10 +80,6 @@ export class CommandExitError extends Error {
 	}
 }
 
-export function createShellExecutor() {
-	return async () => ""
-}
-
 // The real createShellTool, so tests exercise the actual description
 // building and shell classification (getShellKind) rather than a stub that
 // would have to duplicate those invariants.
@@ -97,6 +93,8 @@ export {
 	type PatchFileChange,
 } from "../../../../sdk/packages/core/src/extensions/tools/executors/apply-patch"
 export { PatchActionType } from "../../../../sdk/packages/core/src/extensions/tools/executors/apply-patch-parser"
+// Use the real executor so command tests cover its timeout and cancellation behavior.
+export { createShellExecutor } from "../../../../sdk/packages/core/src/extensions/tools/executors/bash"
 export { createEditorExecutor } from "../../../../sdk/packages/core/src/extensions/tools/executors/editor"
 export type { EditFileInput } from "../../../../sdk/packages/core/src/extensions/tools/schemas"
 export type { ApplyPatchExecutor, EditorExecutor } from "../../../../sdk/packages/core/src/extensions/tools/types"
