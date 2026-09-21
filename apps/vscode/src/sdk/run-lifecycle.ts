@@ -1,3 +1,4 @@
+import { formatErrorDiagnostics } from "@bedrock-coder/shared"
 import { redactBedrockDiagnostics } from "@/services/bedrock/bedrock-errors"
 
 export type AgentRunPhase =
@@ -237,12 +238,21 @@ export function sanitizeRunFailure(
 	source: AgentRunFailureSource,
 	options: { retrySafe?: boolean } = {},
 ): AgentRunFailure {
-	const record = recordFromUnknown(error)
+	let record = recordFromUnknown(error)
+	let rawMessage = error instanceof Error ? error.message : (optionalString(record.message) ?? String(error))
+	try {
+		const payload = recordFromUnknown(JSON.parse(rawMessage))
+		if (optionalString(payload.message)) {
+			record = payload
+			rawMessage = payload.message as string
+		}
+	} catch {
+		// Ordinary exceptions carry their message directly.
+	}
 	const metadata = recordFromUnknown(record.$metadata)
-	const rawMessage = error instanceof Error ? error.message : (optionalString(record.message) ?? String(error))
-	const details = redactBedrockDiagnostics(error instanceof Error ? `${error.name}: ${error.message}` : error)
+	const details = redactBedrockDiagnostics(optionalString(record.details) ?? formatErrorDiagnostics(error), Infinity)
 	const code = optionalString(record.code) ?? optionalString(record.name)
-	const requestId = optionalString(record.requestId) ?? optionalString(metadata.requestId)
+	const requestId = optionalString(record.requestId) ?? optionalString(record.request_id) ?? optionalString(metadata.requestId)
 	const httpStatus =
 		optionalNumber(record.status) ?? optionalNumber(record.statusCode) ?? optionalNumber(metadata.httpStatusCode)
 	const category =
@@ -264,7 +274,7 @@ export function sanitizeRunFailure(
 		...(httpStatus !== undefined ? { httpStatus } : {}),
 		...(requestId ? { requestId } : {}),
 		message: redactBedrockDiagnostics(rawMessage || "The agent run failed."),
-		...(details && details !== rawMessage ? { details } : {}),
+		...(details ? { details } : {}),
 		retrySafe: options.retrySafe ?? source === "stream",
 	}
 }

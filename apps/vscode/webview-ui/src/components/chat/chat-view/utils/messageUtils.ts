@@ -146,7 +146,7 @@ export function filterVisibleMessages(messages: BedrockCoderMessage[]): BedrockC
 			case "task_progress": // task progress messages are displayed in TaskHeader, not in main chat
 			case "checkpoint_created": // checkpoint restore is exposed from user-message edit controls
 				return false
-			// NOTE: reasoning passes through to be included in tool groups
+			// Reasoning passes through to render as its own chat row.
 			case "api_req_started": {
 				// api_req_started rows only render visible content for errors/cancels.
 				// Reasoning has its own standalone ChatRows. Everything else renders
@@ -229,9 +229,14 @@ export function groupMessages(visibleMessages: BedrockCoderMessage[]): (BedrockC
 				// get last api_req_started in currentGroup to check if it's cancelled
 				const lastApiReqStarted = [...currentGroup].reverse().find((m) => m.say === "api_req_started")
 				if (lastApiReqStarted?.text != null) {
-					const info = JSON.parse(lastApiReqStarted.text)
-					const isCancelled = info.cancelReason != null
-					if (isCancelled) {
+					let endSession = false
+					try {
+						endSession = JSON.parse(lastApiReqStarted.text)?.cancelReason != null
+					} catch {
+						// Keep malformed metadata in its row so the rendering fallback can show it.
+						endSession = true
+					}
+					if (endSession) {
 						endBrowserSession()
 						result.push(message)
 						continue
@@ -244,8 +249,10 @@ export function groupMessages(visibleMessages: BedrockCoderMessage[]): (BedrockC
 
 				// Check if this is a close action
 				if (message.say === "browser_action") {
-					const browserAction = JSON.parse(message.text || "{}") as BedrockCoderSayBrowserAction
-					if (browserAction.action === "close") {
+					try {
+						const browserAction = JSON.parse(message.text || "{}") as BedrockCoderSayBrowserAction
+						if (browserAction?.action === "close") endBrowserSession()
+					} catch {
 						endBrowserSession()
 					}
 				}
@@ -515,53 +522,9 @@ export function isApiReqAbsorbable(apiReqTs: number, allMessages: BedrockCoderMe
 }
 
 /**
- * Check if an api_req_started at a given index produces low-stakes tools
- * (regardless of whether it also produces text).
- * If so, it should be absorbed into the tool group rather than rendered separately.
- * The key is: no HIGH-stakes tools (write, edit, command, etc.) AND no reasoning
- */
-function isApiReqFollowedOnlyByLowStakesTools(index: number, messages: (BedrockCoderMessage | BedrockCoderMessage[])[]): boolean {
-	let hasLowStakesTool = false
-	let hasReasoning = false
-	for (let i = index + 1; i < messages.length; i++) {
-		const item = messages[i]
-		if (Array.isArray(item)) {
-			// Browser session - this ends the low-stakes run
-			break
-		}
-		const msg = item
-		// Another api_req_started - stop checking
-		if (msg.say === "api_req_started") {
-			break
-		}
-		// Reasoning - mark it but don't absorb if present
-		if (msg.say === "reasoning") {
-			hasReasoning = true
-			continue
-		}
-		// Low-stakes tool - mark it
-		if (isLowStakesTool(msg)) {
-			hasLowStakesTool = true
-			continue
-		}
-		// Text is OK - it will render separately, but we still absorb api_req
-		if (msg.say === "text") {
-			continue
-		}
-		// High-stakes tool (write, edit, command, etc.) - don't absorb
-		if (msg.say === "tool" || msg.ask === "tool" || msg.ask === "command" || msg.say === "command") {
-			return false
-		}
-	}
-	// Don't absorb if there's reasoning - we want to show "Thoughts >"
-	return hasLowStakesTool && !hasReasoning
-}
-
-/**
- * Group consecutive low-stakes tools (and their reasoning) into arrays.
- * Also filters out checkpoints that follow low-stakes tool groups.
- * Absorbs api_req_started messages that are followed only by low-stakes tools.
- * Only creates tool groups when there's at least one actual tool - reasoning-only groups are dropped.
+ * Group consecutive low-stakes tools into arrays, preserving response rows in order.
+ * Only tool messages may enter a tool group. API rows remaining after filtering
+ * contain errors or cancellation information and must also render separately.
  * Should be called after groupMessages.
  */
 export function groupLowStakesTools(
@@ -569,39 +532,15 @@ export function groupLowStakesTools(
 ): (BedrockCoderMessage | BedrockCoderMessage[])[] {
 	const result: (BedrockCoderMessage | BedrockCoderMessage[])[] = []
 	let toolGroup: BedrockCoderMessage[] = []
-	let pendingReasoning: BedrockCoderMessage[] = []
-	let pendingApiReq: BedrockCoderMessage[] = []
-	let hasTools = false
 	const pendingTools: BedrockCoderMessage[] = []
 
-	const flushPending = () => {
-		pendingApiReq.forEach((m) => {
-			result.push(m)
-		})
-		pendingReasoning.forEach((m) => {
-			result.push(m)
-		})
-		pendingApiReq = []
-		pendingReasoning = []
-	}
-
 	const commitToolGroup = () => {
-		if (toolGroup.length > 0 && hasTools) {
+		if (toolGroup.length > 0) {
 			const group = toolGroup as BedrockCoderMessage[] & { _isToolGroup: boolean }
 			group._isToolGroup = true
 			result.push(group)
-			pendingReasoning = []
-			pendingApiReq = []
 		}
 		toolGroup = []
-		hasTools = false
-	}
-
-	const absorbPending = () => {
-		if (pendingApiReq.length > 0) {
-			toolGroup.push(...pendingApiReq)
-			pendingApiReq = []
-		}
 	}
 
 	for (let i = 0; i < groupedMessages.length; i++) {
@@ -610,24 +549,15 @@ export function groupLowStakesTools(
 		// Browser session group - commit current work and pass through
 		if (Array.isArray(item)) {
 			commitToolGroup()
-			flushPending()
 			result.push(item)
 			continue
 		}
 
 		const message = item
-		const messageType = message.say
 		const isLast = i === groupedMessages.length - 1
 
-		// Low-stakes tool - absorb pending and add to group
+		// Low-stakes tool - add to group
 		if (isLowStakesTool(message)) {
-			// Keep reasoning visible as its own row when it happens before a tool group.
-			// If we absorb it into the group, ToolGroupRenderer hides it entirely.
-			if (!hasTools && pendingReasoning.length > 0) {
-				flushPending()
-			}
-			absorbPending()
-			hasTools = true
 			toolGroup.push(message)
 			// If the streaming has stopped and the last message is still an ask,
 			// this means the tool requires user approval - show the old tool block UI.
@@ -637,50 +567,14 @@ export function groupLowStakesTools(
 			continue
 		}
 
-		// Reasoning - add to group if active, otherwise queue
-		if (messageType === "reasoning") {
-			if (hasTools) {
-				toolGroup.push(message)
-			} else {
-				pendingReasoning.push(message)
-			}
-			continue
-		}
-
-		// API request - absorb if followed by low-stakes tools, otherwise render
-		if (messageType === "api_req_started") {
-			if (isApiReqFollowedOnlyByLowStakesTools(i, groupedMessages)) {
-				absorbPending()
-				pendingApiReq.push(message)
-			} else {
-				commitToolGroup()
-				flushPending()
-				result.push(message)
-			}
-			continue
-		}
-
-		// Text - if a low-stakes tool group is active, finalize it first,
-		// then render the text as a normal chat row. This ensures post-tool
-		// summaries (common in SDK/native-tool-call flows) are visible.
-		if (messageType === "text") {
-			if (hasTools) {
-				commitToolGroup()
-			}
-			flushPending()
-			result.push(message)
-			continue
-		}
-
-		// Everything else - commit group, flush pending, and render
+		// Text and reasoning must stay outside tool groups: the group renderer
+		// only displays tools. Preserve other message types here as well.
 		commitToolGroup()
-		flushPending()
 		result.push(message)
 	}
 
 	// Finalize any remaining work
 	commitToolGroup()
-	flushPending()
 
 	if (pendingTools.length > 0) {
 		result.push(...pendingTools)

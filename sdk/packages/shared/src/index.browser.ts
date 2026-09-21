@@ -1,5 +1,9 @@
 export * from "./agent";
 export * from "./agents";
+export {
+	formatErrorDiagnostics,
+	redactErrorDiagnostics,
+} from "./error-diagnostics";
 export type {
 	ClientContext,
 	ClientName,
@@ -207,7 +211,10 @@ export {
 	xmlTagsRemoval,
 } from "./prompt/format";
 export { BEDROCK_CODER_DEFAULT_MODEL_ID } from "./providers/defaults";
-export { BEDROCK_CODER_DEFAULT_RPC_ADDRESS, BEDROCK_CODER_DEFAULT_RPC_PORT } from "./rpc";
+export {
+	BEDROCK_CODER_DEFAULT_RPC_ADDRESS,
+	BEDROCK_CODER_DEFAULT_RPC_PORT,
+} from "./rpc";
 export type {
 	ChatAttachmentFile,
 	ChatAttachments,

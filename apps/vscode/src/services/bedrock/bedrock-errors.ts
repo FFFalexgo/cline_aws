@@ -1,3 +1,4 @@
+import { redactErrorDiagnostics } from "@bedrock-coder/shared"
 import type { BedrockDoctorError, BedrockDoctorErrorCategory } from "@shared/bedrock-startup"
 
 type ErrorRecord = Record<string, unknown>
@@ -36,22 +37,7 @@ function firstString(chain: ErrorRecord[], keys: string[]): string | undefined {
 	return undefined
 }
 
-const SECRET_PATTERNS: Array<[RegExp, string]> = [
-	[/"(aws_access_key_id|accesskeyid)"\s*:\s*"[^"]*"/gi, '"$1":"[REDACTED]"'],
-	[/"(aws_secret_access_key|secretaccesskey)"\s*:\s*"[^"]*"/gi, '"$1":"[REDACTED]"'],
-	[/"(aws_session_token|sessiontoken|x-amz-security-token)"\s*:\s*"[^"]*"/gi, '"$1":"[REDACTED]"'],
-	[/"authorization"\s*:\s*"[^"]*"/gi, '"Authorization":"[REDACTED]"'],
-	[/\b(AKIA|ASIA)[A-Z0-9]{12,}\b/g, "[REDACTED_AWS_ACCESS_KEY]"],
-	[/\b(aws_access_key_id|accesskeyid)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]"],
-	[/\b(aws_secret_access_key|secretaccesskey)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]"],
-	[/\b(aws_session_token|sessiontoken|x-amz-security-token)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]"],
-	[/\b(authorization)\s*[:=]\s*[^\r\n]+/gi, "$1: [REDACTED]"],
-	[/([?&](?:X-Amz-(?:Credential|Signature|Security-Token)|token|credential)=)[^&\s]+/gi, "$1[REDACTED]"],
-	[/([?&][^=&]*(?:key|secret|password|auth|signature|token|credential)[^=&]*=)[^&\s"]+/gi, "$1[REDACTED]"],
-	[/\barn:aws(?:-[a-z]+)?:sts::\d{12}:[^"\s,;]+/gi, "[REDACTED_STS_IDENTITY]"],
-]
-
-export function redactBedrockDiagnostics(value: unknown): string {
+export function redactBedrockDiagnostics(value: unknown, maxLength = 2_000): string {
 	let serialized: string
 	if (typeof value === "string") {
 		serialized = value
@@ -62,10 +48,7 @@ export function redactBedrockDiagnostics(value: unknown): string {
 			serialized = String(value)
 		}
 	}
-	for (const [pattern, replacement] of SECRET_PATTERNS) {
-		serialized = serialized.replace(pattern, replacement)
-	}
-	return serialized.slice(0, 2_000)
+	return redactErrorDiagnostics(serialized ?? String(value)).slice(0, maxLength)
 }
 
 function categoryFor(description: string, stage: string): BedrockDoctorErrorCategory {

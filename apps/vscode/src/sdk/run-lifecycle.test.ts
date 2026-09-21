@@ -1,6 +1,43 @@
 import { describe, expect, it } from "vitest"
 import { AgentRunLifecycle, sanitizeRunFailure } from "./run-lifecycle"
 
+describe("run failure diagnostics", () => {
+	it("unwraps provider errors without truncating diagnostic details", () => {
+		const details = `Expected string at output.content\n${"context ".repeat(500)}END_OF_ERROR`
+		const failure = sanitizeRunFailure(
+			new Error(
+				JSON.stringify({
+					message: "Model response validation failed",
+					code: "AI_TypeValidationError",
+					request_id: "request-1",
+					status: 200,
+					details,
+				}),
+			),
+			"stream",
+		)
+		expect(failure).toMatchObject({
+			message: "Model response validation failed",
+			code: "AI_TypeValidationError",
+			requestId: "request-1",
+			httpStatus: 200,
+			details,
+		})
+	})
+
+	it("retains plain-text tails and nested error causes while redacting credentials", () => {
+		const longError = `${"details ".repeat(500)}END_OF_ERROR`
+		expect(sanitizeRunFailure(longError, "stream").details).toBe(longError)
+		const failure = sanitizeRunFailure(
+			new Error("Request failed", { cause: new Error("Expected array; secretAccessKey=hidden-credential") }),
+			"stream",
+		)
+		expect(failure.details).toContain("Expected array")
+		expect(failure.details).toContain("run-lifecycle.test.ts")
+		expect(failure.details).not.toContain("hidden-credential")
+	})
+})
+
 describe("AgentRunLifecycle", () => {
 	it.each([
 		{

@@ -66,11 +66,46 @@ describe("chat path references", () => {
 		expect(screen.queryByRole("button")).toBeNull()
 	})
 
+	it("preserves the full response when paths resolve while the response streams", async () => {
+		const path = "/Users/cchen96/BMODev/AgentFlow/benchmark/graph/paystub/package/graph.json"
+		const { rerender, container } = render(<MarkdownBlock markdown={`I checked \`${path}\`. The field is missing.`} />)
+		await screen.findByRole("button", { name: path })
+		rerender(
+			<MarkdownBlock
+				markdown={`I checked \`${path}\`. The field is missing.\n\nUpdate the mapping in benchmark/README.md.\n\n- Keep the existing evaluation.\n- Run it again after the fix.\n\nThe remaining results are valid.`}
+			/>,
+		)
+		await screen.findByRole("button", { name: "benchmark/README.md" })
+
+		expect(container).toHaveTextContent("The field is missing.")
+		expect(container).toHaveTextContent("Update the mapping in benchmark/README.md.")
+		expect(screen.getAllByRole("listitem")).toHaveLength(2)
+		expect(screen.getByText("The remaining results are valid.")).toBeVisible()
+	})
+
 	it("does not reuse a resolved target when a streaming reference changes", async () => {
 		const { rerender } = render(<WorkspacePathLink reference="first.ts">first.ts</WorkspacePathLink>)
 		await screen.findByRole("button", { name: "first.ts" })
 		resolvePath.mockReturnValue(new Promise(() => {}))
 		rerender(<WorkspacePathLink reference="second.ts">second.ts</WorkspacePathLink>)
+		expect(screen.queryByRole("button")).toBeNull()
+	})
+
+	it("preserves all prose when path lookup fails and a stale result arrives after a newer response", async () => {
+		let resolveOld: (value: { value: string }) => void = () => {}
+		resolvePath.mockImplementation(({ value }) =>
+			value === "old.ts"
+				? new Promise((resolve) => {
+						resolveOld = resolve
+					})
+				: Promise.reject(new Error("Path lookup unavailable")),
+		)
+		const { rerender, container } = render(<MarkdownBlock markdown="Before `old.ts` and after the link." />)
+		rerender(<MarkdownBlock markdown="New response with `new.ts`, plus the complete explanation.\n\nFINAL_TEXT" />)
+		resolveOld({ value: "old.ts" })
+		await waitFor(() => expect(resolvePath).toHaveBeenCalledWith({ value: "new.ts" }))
+		expect(container).toHaveTextContent("New response with new.ts, plus the complete explanation.")
+		expect(container).toHaveTextContent("FINAL_TEXT")
 		expect(screen.queryByRole("button")).toBeNull()
 	})
 })

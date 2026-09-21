@@ -16,9 +16,9 @@ import {
 } from "@bedrock-coder/shared";
 import { type CallSettings, jsonSchema, NoSuchToolError, streamText } from "ai";
 import { nanoid } from "nanoid";
+import { serializeBedrockError } from "./bedrock-errors";
 import { extractErrorMessage } from "./format";
 import { isAnthropicCompatibleModel, resolveModelFamily } from "./model-facts";
-import { sanitizeBedrockError } from "./bedrock-errors";
 import {
 	applyPromptCacheToLastTextPart,
 	buildAnthropicProviderOptions,
@@ -785,7 +785,8 @@ async function* emitAiSdkEvents(
 
 				if (part.type === "error") {
 					streamError =
-						capturedError?.current ?? sanitizeBedrockError(part.error);
+						capturedError?.current ??
+						serializeBedrockError(part.error, request.modelId);
 					break;
 				}
 
@@ -802,7 +803,8 @@ async function* emitAiSdkEvents(
 	} catch (error) {
 		// Prefer the real provider error from onError over the generic
 		// NoOutputGeneratedError the AI SDK throws when 0 steps are recorded.
-		streamError = capturedError?.current ?? sanitizeBedrockError(error);
+		streamError =
+			capturedError?.current ?? serializeBedrockError(error, request.modelId);
 	}
 
 	// Prefer stream.usage (has raw cost data) over finish part usage.
@@ -817,7 +819,9 @@ async function* emitAiSdkEvents(
 			usageToEmit = await stream.usage;
 		} catch (error) {
 			if (!streamError) {
-				streamError = capturedError?.current ?? sanitizeBedrockError(error);
+				streamError =
+					capturedError?.current ??
+					serializeBedrockError(error, request.modelId);
 			}
 			usageToEmit = finishUsage;
 			metadataToUse = finishProviderMetadata;
@@ -894,7 +898,7 @@ function createAiSdkProvider(kind: ProviderModuleKind): GatewayProviderFactory {
 					providerOptions,
 					...requestConfig,
 					onError: ({ error: streamError }) => {
-						const msg = sanitizeBedrockError(streamError);
+						const msg = serializeBedrockError(streamError, request.modelId);
 						capturedError.current = msg;
 						if (log?.error) {
 							log.error("[ai-sdk] stream error", {
@@ -927,7 +931,9 @@ function createAiSdkProvider(kind: ProviderModuleKind): GatewayProviderFactory {
 				suppressDanglingStreamPromises(stream);
 				// Prefer the real provider error captured in onError over the generic
 				// NoOutputGeneratedError that the AI SDK throws when 0 steps are recorded.
-				const msg = capturedError.current ?? sanitizeBedrockError(error);
+				const msg =
+					capturedError.current ??
+					serializeBedrockError(error, request.modelId);
 				if (log?.error) {
 					log.error("[ai-sdk] provider error", {
 						providerId: request.providerId,

@@ -3,6 +3,7 @@ import type React from "react"
 import { useMemo } from "react"
 import BrowserSessionRow from "@/components/chat/BrowserSessionRow"
 import ChatRow from "@/components/chat/ChatRow"
+import { MessageErrorBoundary } from "@/components/chat/MessageErrorBoundary"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { cn } from "@/lib/utils"
 import type { MessageHandlers } from "../../types/chatTypes"
@@ -145,19 +146,23 @@ export const createMessageRenderer = (
 	footerActive: boolean,
 ) => {
 	return (index: number, messageOrGroup: BedrockCoderMessage | BedrockCoderMessage[]) => (
-		<MessageRenderer
-			expandedRows={expandedRows}
-			footerActive={footerActive}
-			groupedMessages={groupedMessages}
-			index={index}
-			inputValue={inputValue}
-			messageHandlers={messageHandlers}
-			messageOrGroup={messageOrGroup}
-			modifiedMessages={modifiedMessages}
-			onHeightChange={onHeightChange}
-			onLastRowContentChange={onLastRowContentChange}
-			onSetQuote={onSetQuote}
-			onToggleExpand={onToggleExpand}
-		/>
+		<MessageErrorBoundary
+			key={Array.isArray(messageOrGroup) ? messageOrGroup[0]?.ts : messageOrGroup.ts}
+			message={messageOrGroup}>
+			<MessageRenderer
+				expandedRows={expandedRows}
+				footerActive={footerActive}
+				groupedMessages={groupedMessages}
+				index={index}
+				inputValue={inputValue}
+				messageHandlers={messageHandlers}
+				messageOrGroup={messageOrGroup}
+				modifiedMessages={modifiedMessages}
+				onHeightChange={onHeightChange}
+				onLastRowContentChange={onLastRowContentChange}
+				onSetQuote={onSetQuote}
+				onToggleExpand={onToggleExpand}
+			/>
+		</MessageErrorBoundary>
 	)
 }

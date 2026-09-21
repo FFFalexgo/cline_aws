@@ -1078,6 +1078,35 @@ describe("translateSessionEvent — agent_event done", () => {
 // ---------------------------------------------------------------------------
 
 describe("translateSessionEvent — agent_event error", () => {
+	it.each([false, true])("preserves full validation diagnostics in chat (serialized: %s)", (serialized) => {
+		const diagnostic = {
+			message: "Expected string at output.content",
+			issues: [{ path: ["output", "content"], expected: "string" }],
+		}
+		const error = serialized
+			? new Error(
+					JSON.stringify({
+						message: "Validation failed",
+						code: "AI_TypeValidationError",
+						details: JSON.stringify(diagnostic),
+						request_id: "req-test",
+						modelId: "test-model",
+					}),
+				)
+			: Object.assign(new Error("Validation failed", { cause: diagnostic }), { name: "AI_TypeValidationError" })
+		const result = translateSessionEvent(
+			{ type: "agent_event", payload: { sessionId: "session-1", event: { type: "error", error } as AgentEvent } },
+			new MessageTranslatorState(),
+		)
+		const apiInfo = JSON.parse(result.messages[0].text!)
+		expect(apiInfo.streamingFailedMessage).toBe(result.messages[1].text)
+		const envelope = JSON.parse(result.messages[1].text!)
+		expect(envelope.message).toBe("Validation failed")
+		expect(envelope.code).toBe("AI_TypeValidationError")
+		expect(envelope.details).toContain("Expected string at output.content")
+		expect(JSON.parse(envelope.details)).toMatchObject(serialized ? diagnostic : { cause: diagnostic })
+	})
+
 	it("translates error event to api_req_started + api_req_failed messages", () => {
 		const state = new MessageTranslatorState()
 		const event: CoreSessionEvent = {

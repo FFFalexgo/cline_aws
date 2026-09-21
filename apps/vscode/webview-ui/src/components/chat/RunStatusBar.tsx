@@ -4,6 +4,7 @@ import { CheckCircle2Icon, CircleXIcon, Clock3Icon, LoaderCircleIcon, TriangleAl
 import { memo, useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ModelsServiceClient } from "@/services/grpc-client"
+import { ErrorDetails } from "./ErrorDetails"
 
 function statusLabel(run: AgentRunState): string {
 	switch (run.phase) {
@@ -75,25 +76,27 @@ export const RunStatusBar = memo(({ run }: { run?: AgentRunState }) => {
 				)}
 			</div>
 			{run.phase === "failed" && run.failure && (
-				<details className="mt-2 text-description">
-					<summary className="cursor-pointer select-none">Error details</summary>
-					<div className="mt-1 space-y-1 break-words">
-						<div>
-							{[run.failure.source, run.failure.category, run.failure.code, run.failure.httpStatus]
+				<div className="mt-2 text-description">
+					<ErrorDetails
+						details={[
+							run.failure.message,
+							[run.failure.source, run.failure.category, run.failure.code, run.failure.httpStatus]
 								.filter((value) => value !== undefined)
-								.join(" · ")}
-						</div>
-						{run.failure.requestId && <div>Request ID: {run.failure.requestId}</div>}
-						{run.failure.details && <pre className="m-0 whitespace-pre-wrap">{run.failure.details}</pre>}
-						<Button
-							className="h-auto px-0 py-1 text-xs"
-							onClick={() => void ModelsServiceClient.openBedrockDiagnosticLog(EmptyRequest.create({}))}
-							size="sm"
-							variant="text">
-							Open diagnostic log
-						</Button>
-					</div>
-				</details>
+								.join(" · "),
+							run.failure.requestId && `Request ID: ${run.failure.requestId}`,
+							run.failure.details,
+						]
+							.filter(Boolean)
+							.join("\n\n")}
+					/>
+					<Button
+						className="h-auto px-0 py-1 text-xs"
+						onClick={() => void ModelsServiceClient.openBedrockDiagnosticLog(EmptyRequest.create({}))}
+						size="sm"
+						variant="text">
+						Open diagnostic log
+					</Button>
+				</div>
 			)}
 		</div>
 	)

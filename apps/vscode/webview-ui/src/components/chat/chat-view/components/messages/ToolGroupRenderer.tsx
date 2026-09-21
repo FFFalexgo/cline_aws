@@ -25,6 +25,8 @@ interface ToolWithReasoning {
 
 const EXPANDABLE_TOOLS = new Set(["listFilesTopLevel", "listFilesRecursive", "listCodeDefinitionNames", "searchFiles"])
 
+const getFileName = (path: string) => path.split(/[\\/]/).pop() || path
+
 // Helper to format activity text for active items (from RequestStartRow logic)
 const getActivityText = (tool: BedrockCoderSayTool): string | null => {
 	const cleanedPath = cleanPathPrefix(tool.path || "")
@@ -50,7 +52,7 @@ const getActivityText = (tool: BedrockCoderSayTool): string | null => {
 				tool.readLineStart != null
 					? ` (lines ${tool.readLineStart}${tool.readLineEnd != null ? `-${tool.readLineEnd}` : "+"})`
 					: ""
-			return `Reading ${cleanedPath}${lineHint}...`
+			return `Reading ${getFileName(tool.path)}${lineHint}...`
 		}
 		case "listFilesTopLevel":
 		case "listFilesRecursive":
@@ -192,16 +194,15 @@ export const ToolGroupRenderer = memo(({ messages, allMessages, isLastGroup }: T
 					if (isActive && activityText) {
 						return (
 							<div className="min-w-0" key={tool.ts}>
-								{/* ACTIVE "READING..." ITEM STYLING - Modify vertical spacing here via py-0 and -my-0.5 */}
 								<Button
-									className="flex items-center gap-[3px] text-[13px] text-description py-[1px] min-w-0 max-w-full px-0 leading-tight -my-0.5"
+									className="flex h-auto w-full min-w-0 items-start justify-start gap-1.5 whitespace-normal py-1 px-0 text-left text-[13px] text-description leading-normal"
 									disabled
-									size="icon"
+									title={parsedTool.path}
 									variant="text">
-									<info.icon className="opacity-70 shrink-0 size-[12px]" />
-									<span className="flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis text-left text-[13px]">
+									<info.icon className="mt-1 opacity-70 shrink-0 size-[12px]" />
+									<span className="min-w-0 flex-1 wrap-anywhere [&_span]:whitespace-normal">
 										<TypewriterText speed={15} text={activityText} />
-									</span>{" "}
+									</span>
 								</Button>
 							</div>
 						)
@@ -211,20 +212,13 @@ export const ToolGroupRenderer = memo(({ messages, allMessages, isLastGroup }: T
 					return (
 						<div className="min-w-0" key={tool.ts}>
 							<Button
-								className="flex items-center gap-[3px] cursor-pointer text-[13px] text-description py-[1px] hover:text-link min-w-0 max-w-full px-0 leading-tight -my-0.5"
+								aria-expanded={isExpandable ? isItemExpanded : undefined}
+								className="flex h-auto w-full min-w-0 items-start justify-start gap-1.5 whitespace-normal py-1 px-0 text-left text-[13px] text-description leading-normal cursor-pointer hover:text-link"
 								onClick={() => (isExpandable ? handleItemToggle(tool.ts) : handleOpenFile(info.path))}
-								size="icon"
+								title={info.path}
 								variant="text">
-								<info.icon className="opacity-70 shrink-0 size-[12px]" />
-								<span
-									className={cn(
-										"flex-1 min-w-0 whitespace-nowrap overflow-hidden text-ellipsis text-left [direction:rtl] text-[13px]",
-										{
-											"[direction:ltr]": !!info.displayText,
-										},
-									)}>
-									{(info.displayText || cleanPathPrefix(info.path)) + "\u200E"}
-								</span>
+								<info.icon className="mt-1 opacity-70 shrink-0 size-[12px]" />
+								<span className="min-w-0 flex-1 wrap-anywhere">{info.displayText || info.path}</span>
 							</Button>
 							{/* Expanded content for folders/search/definitions - file lists only */}
 							{isExpandable && isItemExpanded && content && (
@@ -313,7 +307,7 @@ function getToolDisplayInfo(tool: BedrockCoderSayTool) {
 				icon,
 				path: filePath,
 				label: "read",
-				displayText: lineNote ? `${cleanPathPrefix(filePath)} · ${lineNote}` : undefined,
+				displayText: `${getFileName(filePath)}${lineNote ? ` · ${lineNote}` : ""}`,
 			}
 		}
 		case "listFilesTopLevel":

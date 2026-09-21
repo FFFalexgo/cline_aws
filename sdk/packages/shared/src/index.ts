@@ -7,6 +7,10 @@ export {
 } from "./approval-policy";
 export type { Disposable } from "./dispose";
 export { disposeAll, registerDisposable } from "./dispose";
+export {
+	formatErrorDiagnostics,
+	redactErrorDiagnostics,
+} from "./error-diagnostics";
 export type {
 	ClientContext,
 	ClientName,

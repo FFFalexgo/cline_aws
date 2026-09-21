@@ -1,3 +1,5 @@
+import { formatErrorDiagnostics } from "@bedrock-coder/shared";
+
 type ErrorRecord = Record<string, unknown>;
 
 function asRecord(value: unknown): ErrorRecord | undefined {
@@ -72,7 +74,11 @@ export function sanitizeBedrockError(error: unknown): string {
 	let category: BedrockErrorCategory = "service";
 	let message = "AWS Bedrock request failed.";
 
-	if (description.includes("bedrock_ca_bundle")) {
+	if (/(typevalidationerror|type validation failed)/.test(description)) {
+		category = "validation";
+		message =
+			"The model response did not match the format expected by the Bedrock adapter.";
+	} else if (description.includes("bedrock_ca_bundle")) {
 		category = "ca-bundle";
 		message = "The configured CA bundle is missing, unreadable, or invalid.";
 	} else if (
@@ -120,4 +126,23 @@ export function sanitizeBedrockError(error: unknown): string {
 	const code = errorCode(chain);
 	const id = requestId(chain);
 	return `Bedrock ${category}: ${message}${code ? ` Error code: ${code}.` : ""}${id ? ` Request ID: ${id}` : ""}`;
+}
+
+/** Carry the summary and full diagnostics through the SDK's string error channel. */
+export function serializeBedrockError(error: unknown, modelId: string): string {
+	const chain = errorChain(error);
+	const metadata = chain.map((item) => asRecord(item.$metadata)).find(Boolean);
+	const status =
+		chain
+			.map((item) => item.statusCode ?? item.status)
+			.find((value) => typeof value === "number") ?? metadata?.httpStatusCode;
+	return JSON.stringify({
+		message: sanitizeBedrockError(error),
+		code: errorCode(chain),
+		request_id: requestId(chain),
+		status: typeof status === "number" ? status : undefined,
+		providerId: "bedrock",
+		modelId,
+		details: formatErrorDiagnostics(error),
+	});
 }

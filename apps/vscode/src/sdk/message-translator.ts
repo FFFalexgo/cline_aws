@@ -27,7 +27,7 @@
 
 import type { CoreSessionEvent } from "@bedrock-coder/core"
 import type { Message as SdkMessage } from "@bedrock-coder/llms"
-import { type AgentEvent, formatDisplayUserInput } from "@bedrock-coder/shared"
+import { type AgentEvent, formatDisplayUserInput, formatErrorDiagnostics, redactErrorDiagnostics } from "@bedrock-coder/shared"
 import { COMMAND_OUTPUT_STRING } from "@shared/combineCommandSequences"
 import type {
 	BedrockCoderApiReqInfo,
@@ -2108,7 +2108,15 @@ function describeModelNotFoundError(rawMessage: string): string | undefined {
  * info from the error message when present and falling back to raw text.
  */
 export function reshapeErrorForWebview(
-	error: { message?: string; status?: number; code?: string },
+	error: {
+		message?: string
+		name?: string
+		stack?: string
+		status?: number
+		code?: string
+		cause?: unknown
+		details?: unknown
+	},
 	providerId = "bedrock",
 ): string {
 	const rawMessage = error.message ?? "Unknown error"
@@ -2131,13 +2139,27 @@ export function reshapeErrorForWebview(
 		}
 	}
 
-	if (!parsed) {
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 		const notFoundMessage = describeModelNotFoundError(rawMessage)
-		if (notFoundMessage) {
-			return notFoundMessage
+		if (error.cause !== undefined || error.code || error.details || error.stack || (error.name && error.name !== "Error")) {
+			return JSON.stringify({
+				message: redactErrorDiagnostics(notFoundMessage ?? rawMessage),
+				code: error.code ?? error.name,
+				status: error.status,
+				providerId,
+				details: formatErrorDiagnostics(error),
+			})
 		}
-		return rawMessage
+		return redactErrorDiagnostics(notFoundMessage ?? rawMessage)
 	}
 
-	return JSON.stringify({ ...parsed, providerId: parsed.providerId ?? providerId })
+	return JSON.stringify({
+		message: redactErrorDiagnostics(typeof parsed.message === "string" ? parsed.message : rawMessage),
+		code: parsed.code,
+		status: parsed.status ?? parsed.statusCode,
+		request_id: parsed.request_id ?? parsed.requestId,
+		modelId: parsed.modelId,
+		providerId: parsed.providerId ?? providerId,
+		details: typeof parsed.details === "string" ? redactErrorDiagnostics(parsed.details) : formatErrorDiagnostics(parsed),
+	})
 }

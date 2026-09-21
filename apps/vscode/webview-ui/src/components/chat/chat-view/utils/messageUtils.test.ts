@@ -1,6 +1,13 @@
 import type { BedrockCoderMessage } from "@shared/ExtensionMessage"
 import { describe, expect, it } from "vitest"
-import { canRestoreWorkspaceFromMessage, filterVisibleMessages, groupLowStakesTools, isToolGroup } from "./messageUtils"
+import {
+	canRestoreWorkspaceFromMessage,
+	filterVisibleMessages,
+	groupLowStakesTools,
+	groupMessages,
+	isLowStakesTool,
+	isToolGroup,
+} from "./messageUtils"
 
 const createTextMessage = (ts: number, text: string): BedrockCoderMessage => ({
 	type: "say",
@@ -111,6 +118,87 @@ describe("canRestoreWorkspaceFromMessage", () => {
 })
 
 describe("groupLowStakesTools", () => {
+	it("preserves browser history and later responses when grouping metadata is malformed", () => {
+		const history: BedrockCoderMessage[] = [
+			{ ts: 1, type: "say", say: "browser_action_launch", text: "https://example.test" },
+			{ ts: 2, type: "say", say: "api_req_started", text: "incomplete metadata" },
+			{ ts: 3, type: "say", say: "api_req_started", text: "{}" },
+			createTextMessage(4, "The response after malformed metadata remains."),
+			{ ts: 5, type: "say", say: "browser_action_launch", text: "https://example.test" },
+			{ ts: 6, type: "say", say: "browser_action", text: "incomplete browser action" },
+			createTextMessage(7, "The response after a malformed action remains."),
+		]
+		expect(groupMessages(history).flat()).toEqual(history)
+	})
+
+	it.each([
+		"readFile",
+		"listFilesTopLevel",
+		"listFilesRecursive",
+		"listCodeDefinitionNames",
+		"searchFiles",
+	])("preserves every response in every streaming prefix and saved history around %s", (tool) => {
+		const responses: BedrockCoderMessage[] = [
+			createTextMessage(0, "Text before and after src/file.ts must remain."),
+			createReasoningMessage(0, "Reasoning around file reads must remain."),
+			{ ts: 0, type: "say", say: "completion_result", text: "Final answer with `src/file.ts`." },
+			{ ts: 0, type: "say", say: "error", text: "Full error must remain." },
+			{ ts: 0, type: "say", say: "api_req_started", text: JSON.stringify({ streamingFailedMessage: "Validation failed" }) },
+			{ ts: 0, type: "say", say: "api_req_started", text: JSON.stringify({ cancelReason: "user_cancelled" }) },
+		]
+		for (const partial of [true, false]) {
+			for (const response of responses) {
+				const transcript = [
+					{ ...response, ts: 1, partial },
+					createToolMessage(2, tool),
+					{ ...response, ts: 3, partial },
+					createToolMessage(4, tool),
+					{ ...response, ts: 5, partial },
+				]
+				for (let count = 1; count <= transcript.length; count++) {
+					const prefix = transcript.slice(0, count)
+					for (const history of [prefix, JSON.parse(JSON.stringify(prefix)) as BedrockCoderMessage[]]) {
+						const grouped = groupLowStakesTools(groupMessages(filterVisibleMessages(history)))
+						expect(grouped.flat()).toEqual(history)
+						for (const group of grouped.filter(isToolGroup)) expect(group.every(isLowStakesTool)).toBe(true)
+					}
+				}
+			}
+		}
+	})
+
+	it("keeps every response between and after reads when API rows are filtered out", () => {
+		const reasoning = createReasoningMessage(5, "The first file explains the failure. I will check the graph next.")
+		const summary = createTextMessage(7, "The graph uses an outdated field. Update `src/file.ts` to fix it.")
+		const finalReasoning = createReasoningMessage(8, "The diagnosis is complete.")
+		const messages: BedrockCoderMessage[] = [
+			{ ts: 1, type: "say", say: "api_req_started", text: JSON.stringify({ cost: 0 }) },
+			createTextMessage(2, "I will inspect the evaluation files."),
+			createToolMessage(3, "readFile"),
+			{ ts: 4, type: "say", say: "api_req_started", text: JSON.stringify({ cost: 0 }) },
+			reasoning,
+			createToolMessage(6, "readFile"),
+			summary,
+			finalReasoning,
+		]
+		const grouped = groupLowStakesTools(groupMessages(filterVisibleMessages(messages)))
+
+		expect(grouped).toEqual([messages[1], expect.any(Array), reasoning, expect.any(Array), summary, finalReasoning])
+		expect(
+			grouped
+				.filter(isToolGroup)
+				.flat()
+				.map((message) => message.ts),
+		).toEqual([3, 6])
+	})
+
+	it("keeps a streaming reasoning message visible after the last file read", () => {
+		const reasoning = { ...createReasoningMessage(2, "Checking the result"), partial: true }
+		const grouped = groupLowStakesTools([createToolMessage(1, "readFile"), reasoning])
+
+		expect(grouped).toEqual([expect.any(Array), reasoning])
+	})
+
 	it("keeps text that arrives after a low-stakes tool group by finalizing the group first", () => {
 		const grouped = groupLowStakesTools([
 			createTextMessage(1, "Initial text"),

@@ -2,7 +2,7 @@
 	"name": "bedrock-coder",
 	"displayName": "Bedrock Coder",
 	"description": "A local-first VS Code coding agent powered exclusively by Amazon Bedrock.",
-	"version": "0.1.7",
+	"version": "0.1.8",
 	"icon": "assets/icons/icon.png",
 	"engines": {
 		"vscode": "^1.106.0"
