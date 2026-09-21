@@ -24,6 +24,8 @@ export interface SdkDiffEditCoordinatorOptions {
 	fallbackEditorExecutor?: EditorExecutor
 	/** Injectable for tests. Defaults to the SDK's disk-writing apply_patch executor. */
 	fallbackApplyPatchExecutor?: ApplyPatchExecutor
+	/** Captures actual writes for the persistent chat review panel. */
+	trackEdit?: (cwd: string, paths: () => Promise<string[]>, execute: () => Promise<string>) => Promise<string>
 }
 
 interface DiffEditPreview {
@@ -92,7 +94,10 @@ export class SdkDiffEditCoordinator {
 	async executeEditorTool(input: EditFileInput, cwd: string, context: AgentToolContext): Promise<string> {
 		const toolCallId = context.toolCallId ?? ""
 		try {
-			return await this.fallbackEditorExecutor(input, cwd, context)
+			const execute = () => this.fallbackEditorExecutor(input, cwd, context)
+			return await (this.options.trackEdit
+				? this.options.trackEdit(cwd, async () => [resolveEditPath(cwd, input.path)], execute)
+				: execute())
 		} finally {
 			await this.discardPreview(toolCallId)
 		}
@@ -107,7 +112,20 @@ export class SdkDiffEditCoordinator {
 		const session = this.sessions.get(toolCallId)
 		try {
 			await this.discardPreview(toolCallId)
-			return await this.fallbackApplyPatchExecutor(input, cwd, context)
+			const execute = () => this.fallbackApplyPatchExecutor(input, cwd, context)
+			return await (this.options.trackEdit
+				? this.options.trackEdit(
+						cwd,
+						async () => {
+							const { changes } = await computePatchChanges(input.input, cwd)
+							return Object.entries(changes).flatMap(([file, change]) => [
+								resolveEditPath(cwd, file),
+								...(change.movePath ? [resolveEditPath(cwd, change.movePath)] : []),
+							])
+						},
+						execute,
+					)
+				: execute())
 		} catch (error) {
 			throw new Error(await this.describePatchFailure(session, error))
 		} finally {

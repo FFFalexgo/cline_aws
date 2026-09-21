@@ -17,6 +17,7 @@ import type { CreateTeamTaskInput, TeamBoardSnapshot, TeamRunRecord, TeamTask, U
 import { formatDisplayUserInput } from "@bedrock-coder/shared"
 import type { ChatContent } from "@shared/ChatContent"
 import { mentionRegexGlobal } from "@shared/context-mentions"
+import type { EditReviewChange } from "@shared/EditReview"
 import type { ExtensionState } from "@shared/ExtensionMessage"
 import type { HistoryItem } from "@shared/HistoryItem"
 import {
@@ -31,7 +32,7 @@ import type { BedrockCoderCheckpointRestore } from "@shared/WebviewMessage"
 import * as vscode from "vscode"
 import { sendTeamBoardUpdate } from "@/core/controller/team/subscribeToTeamBoard"
 import { parseMentions } from "@/core/mentions"
-import { ensureMcpServersDirectoryExists } from "@/core/storage/disk"
+import { ensureMcpServersDirectoryExists, ensureTaskDirectoryExists } from "@/core/storage/disk"
 import { StateManager } from "@/core/storage/StateManager"
 import { WorkspaceRootManager } from "@/core/workspace/WorkspaceRootManager"
 import { HostProvider } from "@/hosts/host-provider"
@@ -54,6 +55,7 @@ import {
 } from "./sdk-checkpoints"
 import { SdkCompactionCoordinator } from "./sdk-compaction-coordinator"
 import { SdkDiffEditCoordinator } from "./sdk-diff-edit-coordinator"
+import { SdkEditReviewStore } from "./sdk-edit-review-store"
 import { SdkFollowupCoordinator } from "./sdk-followup-coordinator"
 import { SdkForegroundCommandCoordinator } from "./sdk-foreground-command-coordinator"
 import { SdkInteractionCoordinator } from "./sdk-interaction-coordinator"
@@ -146,6 +148,7 @@ export class Controller {
 	private sessionRebuilds: SdkSessionRebuildScheduler
 	private interactions: SdkInteractionCoordinator
 	private diffEdits: SdkDiffEditCoordinator
+	private readonly editReview: SdkEditReviewStore
 	private sessionConfigBuilder: SdkSessionConfigBuilder
 	private taskHistory: SdkTaskHistory
 	private mode: SdkModeCoordinator
@@ -245,8 +248,21 @@ export class Controller {
 			shouldStopAfterModeSwitch: () => this.mode.hasPendingModeChange(),
 			onConsecutiveMistakeLimitReached: (context) => this.interactions.handleConsecutiveMistakeLimitReached(context),
 		})
+		this.editReview = new SdkEditReviewStore({
+			getDirectory: ensureTaskDirectoryExists,
+			isDirty: (file) =>
+				vscode.workspace.textDocuments.some((document) => arePathsEqual(document.uri.fsPath, file) && document.isDirty),
+			onChanged: () => {
+				void this.postStateToWebview().catch((error) => Logger.error("Failed to update file review:", error))
+			},
+		})
 		this.diffEdits = new SdkDiffEditCoordinator({
 			getCwd: () => this.getWorkspaceRoot(),
+			trackEdit: (cwd, paths, execute) => {
+				const taskId = this.task?.taskId
+				if (!taskId) throw new Error("No active task for file edit review")
+				return this.editReview.track(taskId, cwd, paths, execute)
+			},
 		})
 		this.interactions = new SdkInteractionCoordinator({
 			messages: this.messages,
@@ -1606,10 +1622,17 @@ export class Controller {
 				}
 			}
 
-			// Stamp the snapshot with the current epoch and a fresh monotonic version, sampled
-			// from the SAME counter that stamps messages. This lets the webview ignore stale
-			// out-of-order state pushes and fence traffic from a previous task/render. Sampled
-			// synchronously here (no await between sampling and return).
+			const reviewTaskId = this.task?.taskId
+			let reviewChanges: EditReviewChange[] = []
+			let reviewError: string | undefined
+			try {
+				if (reviewTaskId) reviewChanges = await this.editReview.list(reviewTaskId)
+			} catch (error) {
+				Logger.error("Failed to load file review:", error)
+				reviewError = "Saved file changes could not be loaded. Your conversation is still available."
+			}
+			// Sample the shared replica fence only after asynchronous state reads finish.
+			// No await may occur between sampling and returning this snapshot.
 			const minter = this.messageTranslatorState.getMinter()
 			return {
 				...state,
@@ -1621,6 +1644,15 @@ export class Controller {
 				turnState: this.turnStateTracker.get(),
 				runState: this.runLifecycle.get(),
 				queuedPrompts,
+				editReview:
+					reviewTaskId && this.task?.taskId === reviewTaskId
+						? {
+								taskId: reviewTaskId,
+								changes: reviewChanges,
+								isRunning: activeSession?.isRunning ?? false,
+								error: reviewError,
+							}
+						: undefined,
 				stateVersion: minter.nextSeq(),
 				epoch: minter.epoch,
 			}
@@ -1632,6 +1664,24 @@ export class Controller {
 
 	getToolResult(id: string): StoredToolResult | undefined {
 		return this.toolResults.get(id)
+	}
+
+	async reviewEdit(request: { taskId: string; changeId: string; revision: number; action: string }): Promise<void> {
+		if (!request.taskId || this.task?.taskId !== request.taskId)
+			throw new Error("Open the task that made this edit to review it.")
+		if (request.action === "diff") {
+			const change = await this.editReview.get(request.taskId, request.changeId, request.revision)
+			await HostProvider.diff.openMultiFileDiff({
+				title: `${path.basename(change.absolutePath)}: Before ↔ Agent changes`,
+				diffs: [{ filePath: change.absolutePath, leftContent: change.before ?? "", rightContent: change.after ?? "" }],
+			})
+			return
+		}
+		if (request.action !== "keep" && request.action !== "undo") throw new Error("Unknown file review action")
+		if (this.sessions.getActiveSession()?.isRunning)
+			throw new Error("Wait for the agent to finish or stop it before keeping or undoing edits.")
+		await this.editReview.resolve(request.taskId, request.changeId, request.revision, request.action)
+		await this.postStateToWebview()
 	}
 
 	// ---- Terminal settings ----

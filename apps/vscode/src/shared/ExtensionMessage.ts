@@ -43,6 +43,7 @@ export interface ExtensionState {
 	preferredLanguage?: string
 	mode: Mode
 	bedrockCoderMessages: BedrockCoderMessage[]
+	editReview?: import("./EditReview").EditReviewState
 	checkpointRestoreInput?: {
 		text: string
 		images?: string[]

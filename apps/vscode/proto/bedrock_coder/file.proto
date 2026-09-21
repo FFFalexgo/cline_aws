@@ -10,6 +10,9 @@ option java_package = "com.fffalexgo.bedrock_coder.proto";
 
 // Service for file-related operations
 service FileService {
+  // Review a specific revision of an edit made by the active task.
+  rpc reviewEdit(EditReviewRequest) returns (Empty);
+
   // Copies text to clipboard
   rpc copyToClipboard(StringRequest) returns (Empty);
 
@@ -167,6 +170,14 @@ message FileSearchResults {
   optional string error_reason = 3;
   // Optional human-readable detail; rendered as a subtitle in the picker UI.
   optional string error_message = 4;
+}
+
+// A revision check prevents a stale click from deciding newer edits.
+message EditReviewRequest {
+  string task_id = 1;
+  string change_id = 2;
+  int32 revision = 3;
+  string action = 4; // "diff", "keep", or "undo"
 }
 
 // File information structure for search results

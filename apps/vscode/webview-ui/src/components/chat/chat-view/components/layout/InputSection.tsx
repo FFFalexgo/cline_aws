@@ -1,5 +1,6 @@
 import React from "react"
 import ChatTextArea from "@/components/chat/ChatTextArea"
+import { EditReviewPanel } from "@/components/chat/EditReviewPanel"
 import QuotedMessagePreview from "@/components/chat/QuotedMessagePreview"
 import { RunStatusBar } from "@/components/chat/RunStatusBar"
 import { useExtensionState } from "@/context/ExtensionStateContext"
@@ -42,7 +43,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
 	} = chatState
 
 	const { isAtBottom, scrollToBottomAuto } = scrollBehavior
-	const { turnState, runState, bedrockStartup } = useExtensionState()
+	const { turnState, runState, bedrockStartup, editReview } = useExtensionState()
 	const legacyTaskRunning =
 		turnState === undefined &&
 		(lastMessage?.partial === true || (lastMessage?.type === "say" && lastMessage.say === "api_req_started"))
@@ -52,6 +53,7 @@ export const InputSection: React.FC<InputSectionProps> = ({
 	return (
 		<>
 			<RunStatusBar run={runState} />
+			<EditReviewPanel key={editReview?.taskId} review={editReview} />
 			{activeQuote && (
 				<div style={{ marginBottom: "-12px", marginTop: "10px" }}>
 					<QuotedMessagePreview
