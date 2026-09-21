@@ -196,14 +196,13 @@ export const CommandOutputRow = memo(
 							<div className="flex items-center gap-2 flex-1 m-w-0">
 								<div
 									className={cn("bg-description rounded-full w-2 h-2 shrink-0", {
-										"bg-success": isCommandExecuting || isCommandCompleted,
-										"animate-pulse": isCommandExecuting,
+										"bg-success animate-pulse": isCommandExecuting,
 										"bg-editor-warning-foreground": isCommandPending,
 									})}
 								/>
 								<span
 									className={cn("text-description font-medium text-base shrink-0", {
-										"text-success": isCommandExecuting || isCommandCompleted,
+										"text-success": isCommandExecuting,
 										"text-editor-warning-foreground": isCommandPending,
 									})}>
 									{getCommandStatusText(isCommandExecuting, isCommandPending, isCommandCompleted)}
