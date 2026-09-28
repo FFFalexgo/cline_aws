@@ -123,6 +123,8 @@ Design rules:
 6. `@bedrock-coder/agents` runs the loop using `@bedrock-coder/llms` handlers.
 7. `@bedrock-coder/core` persists state, artifacts, and metadata.
 
+Reasoning stream events may carry a response-local `blockId` and metadata without visible text. The agent loop assembles each block separately, including metadata delivered at block completion, so adjacent encrypted blocks cannot overwrite one another. Core retains provider metadata on persisted `redacted_thinking` blocks and restores it on resume; the model adapter owns replaying that metadata in the provider's wire format.
+
 Completion telemetry is anchored to the assistant's explicit completion
 declaration, not session shutdown. After each agent turn, the local
 runtime inspects `AgentResult.toolCalls` and emits `task.completed` the

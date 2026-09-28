@@ -88,6 +88,16 @@ function shouldIncludeReasoningHistory(
 	return true;
 }
 
+function readBedrockReasoningMetadata(value: unknown) {
+	if (!value || typeof value !== "object") return undefined;
+	const record = value as Record<string, unknown>;
+	const metadata: Record<string, string> = {};
+	for (const key of ["signature", "redactedData", "redactedContent"] as const) {
+		if (typeof record[key] === "string") metadata[key] = record[key];
+	}
+	return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
 function toAiSdkMessages(
 	messages: readonly AgentMessage[],
 	systemPrompt?: string,
@@ -110,24 +120,11 @@ function toAiSdkMessages(
 					skippedReasoning = true;
 					continue;
 				}
-				const metadata = part.metadata as Record<string, unknown> | undefined;
-				const signature = metadata?.signature;
-				const redactedData = metadata?.redactedData;
+				const metadata = readBedrockReasoningMetadata(part.metadata);
 				content.push({
 					type: "reasoning",
 					text: sanitizeSurrogates(part.text),
-					...(typeof signature === "string" || typeof redactedData === "string"
-						? {
-								providerOptions: {
-									anthropic: {
-										...(typeof signature === "string" ? { signature } : {}),
-										...(typeof redactedData === "string"
-											? { redactedData }
-											: {}),
-									},
-								},
-							}
-						: {}),
+					...(metadata ? { providerOptions: { bedrock: metadata } } : {}),
 				});
 				continue;
 			}
@@ -694,15 +691,34 @@ async function* emitAiSdkEvents(
 					continue;
 				}
 
-				if (part.type === "reasoning-delta" || part.type === "reasoning") {
+				if (
+					part.type === "reasoning-delta" ||
+					part.type === "reasoning" ||
+					part.type === "reasoning-end"
+				) {
 					const text =
 						(part.textDelta as string | undefined) ??
 						(part.text as string | undefined) ??
-						(part.reasoning as string | undefined);
-					if (text) {
+						(part.reasoning as string | undefined) ??
+						(part.delta as string | undefined) ??
+						"";
+					// Encrypted payloads arrive on reasoning-end, with no visible text.
+					const providerMetadata = part.providerMetadata as
+						| Record<string, unknown>
+						| undefined;
+					const metadata = readBedrockReasoningMetadata(
+						providerMetadata?.bedrock,
+					);
+					if (text || metadata) {
 						yield {
 							type: "reasoning-delta",
 							text,
+							...(typeof part.id === "string" ? { blockId: part.id } : {}),
+							...(metadata ? { metadata } : {}),
+							...(metadata?.redactedContent !== undefined ||
+							metadata?.redactedData !== undefined
+								? { redacted: true }
+								: {}),
 						};
 					}
 					continue;

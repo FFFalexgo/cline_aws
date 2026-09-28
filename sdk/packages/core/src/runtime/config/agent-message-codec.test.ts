@@ -7,6 +7,68 @@ import {
 } from "./agent-message-codec";
 
 describe("agent message codec", () => {
+	it.each([
+		"redactedContent",
+		"redactedData",
+	])("preserves encrypted %s reasoning when saving and resuming", (key) => {
+		const content = [
+			{
+				type: "reasoning" as const,
+				text: "",
+				redacted: true,
+				metadata: { [key]: "encrypted-first" },
+			},
+			{
+				type: "reasoning" as const,
+				text: "",
+				redacted: true,
+				metadata: { [key]: "encrypted-second" },
+			},
+			{ type: "text" as const, text: "Visible response stays intact." },
+		];
+		const persisted = agentMessageToMessageWithMetadata({
+			id: "encrypted",
+			role: "assistant",
+			createdAt: 1,
+			content,
+		});
+		expect(persisted.content).toEqual([
+			{
+				type: "redacted_thinking",
+				data: "encrypted-first",
+				metadata: { [key]: "encrypted-first" },
+			},
+			{
+				type: "redacted_thinking",
+				data: "encrypted-second",
+				metadata: { [key]: "encrypted-second" },
+			},
+			{ type: "text", text: "Visible response stays intact." },
+		]);
+		const [restored] = messagesToAgentMessages([
+			JSON.parse(JSON.stringify(persisted)),
+		]);
+		expect(restored.content).toEqual(content);
+		expect(agentMessageToMessageWithMetadata(restored)).toEqual(persisted);
+	});
+
+	it("retains legacy encrypted history without provider metadata", () => {
+		const persisted = {
+			id: "legacy",
+			role: "assistant" as const,
+			ts: 1,
+			content: [{ type: "redacted_thinking" as const, data: "legacy-data" }],
+		};
+		const [restored] = messagesToAgentMessages([persisted]);
+		expect(restored.content[0]).toMatchObject({
+			redacted: true,
+			metadata: { data: "legacy-data" },
+		});
+		expect(agentMessageToMessageWithMetadata(restored).content).toEqual(
+			persisted.content,
+		);
+	});
+
 	it("replaces empty persisted messages with an explicit error text part", () => {
 		expect(
 			messageToAgentMessages({

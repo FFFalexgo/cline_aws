@@ -57,6 +57,13 @@ function toGatewayRequestMessages(
 										? { signature: part.signature, details: part.details }
 										: undefined,
 								}];
+							case "redacted_thinking":
+								return [{
+									type: "reasoning" as const,
+									text: "",
+									redacted: true,
+									metadata: part.metadata ?? { redactedData: part.data },
+								}];
 							case "tool_use":
 								return [{
 									type: "tool-call" as const,

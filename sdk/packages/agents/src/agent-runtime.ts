@@ -1,6 +1,6 @@
 import {
-	createBedrockAgentModel,
 	type BedrockConnection,
+	createBedrockAgentModel,
 } from "@bedrock-coder/llms";
 import type {
 	AgentAfterToolResult,
@@ -12,6 +12,7 @@ import type {
 	AgentModelEvent,
 	AgentModelFinishReason,
 	AgentModelRequest,
+	AgentReasoningPart,
 	AgentRunResult,
 	AgentRuntimeEvent,
 	AgentRuntimeHooks,
@@ -870,6 +871,7 @@ export class AgentRuntime {
 		let finishReason: AgentModelFinishReason = "stop";
 		let accumulatedText = "";
 		let accumulatedReasoning = "";
+		const reasoningBlocks = new Map<string, AgentReasoningPart>();
 
 		for await (const event of stream) {
 			this.throwIfAborted();
@@ -897,20 +899,31 @@ export class AgentRuntime {
 				case "reasoning-delta": {
 					accumulatedReasoning += event.text;
 					const last = sequence.at(-1);
-					if (last?.type === "part" && last.part.type === "reasoning") {
-						last.part.text += event.text;
-						last.part.redacted = event.redacted ?? last.part.redacted;
-						last.part.metadata = event.metadata ?? last.part.metadata;
+					const existing =
+						event.blockId !== undefined
+							? reasoningBlocks.get(event.blockId)
+							: last?.type === "part" && last.part.type === "reasoning"
+								? last.part
+								: undefined;
+					if (existing) {
+						existing.text += event.text;
+						existing.redacted = event.redacted ?? existing.redacted;
+						if (event.metadata !== undefined) {
+							existing.metadata = mergePartMetadata(
+								existing.metadata,
+								event.metadata,
+							);
+						}
 					} else {
-						sequence.push({
-							type: "part",
-							part: {
-								type: "reasoning",
-								text: event.text,
-								redacted: event.redacted,
-								metadata: event.metadata,
-							},
-						});
+						const part: AgentReasoningPart = {
+							type: "reasoning",
+							text: event.text,
+							redacted: event.redacted,
+							metadata: event.metadata,
+						};
+						sequence.push({ type: "part", part });
+						if (event.blockId !== undefined)
+							reasoningBlocks.set(event.blockId, part);
 					}
 					await this.emit({
 						type: "assistant-reasoning-delta",
@@ -948,7 +961,7 @@ export class AgentRuntime {
 						assembly.inputValue = event.input;
 					}
 					if (event.metadata !== undefined) {
-						assembly.metadata = mergeToolMetadata(
+						assembly.metadata = mergePartMetadata(
 							assembly.metadata,
 							event.metadata,
 						);
@@ -1004,7 +1017,7 @@ export class AgentRuntime {
 				toolName: assembly.toolName,
 				input: parsed.input,
 				metadata: parsed.parseError
-					? mergeToolMetadata(assembly.metadata, {
+					? mergePartMetadata(assembly.metadata, {
 							inputParseError: parsed.parseError,
 							rawInputText: assembly.inputText,
 						})
@@ -1521,7 +1534,7 @@ function buildEventMetadata(event: AgentRuntimeEvent): Record<string, unknown> {
 	};
 }
 
-function mergeToolMetadata(current: unknown, patch: unknown): unknown {
+function mergePartMetadata(current: unknown, patch: unknown): unknown {
 	if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
 		return patch;
 	}

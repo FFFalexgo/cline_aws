@@ -173,7 +173,7 @@ function contentBlockToAgentPart(block: ContentBlock): AgentMessagePart {
 				type: "reasoning",
 				text: "",
 				redacted: true,
-				metadata: { data: block.data },
+				metadata: block.metadata ?? { data: block.data },
 			};
 		case "image":
 			return { type: "image", image: block.data, mediaType: block.mediaType };
@@ -216,11 +216,21 @@ function agentPartToContentBlock(
 			return { type: "text", text: (part as AgentTextPart).text };
 		case "reasoning": {
 			if (part.redacted === true) {
+				const metadata = part.metadata as
+					| { redactedContent?: string; redactedData?: string; data?: string }
+					| undefined;
 				const data =
-					(part.metadata as { data?: string } | undefined)?.data ?? "";
+					metadata?.redactedContent ??
+					metadata?.redactedData ??
+					metadata?.data ??
+					"";
 				return {
 					type: "redacted_thinking",
 					data,
+					...(metadata?.redactedContent !== undefined ||
+					metadata?.redactedData !== undefined
+						? { metadata: part.metadata }
+						: {}),
 				} satisfies RedactedThinkingContent;
 			}
 			const metadata = part.metadata as

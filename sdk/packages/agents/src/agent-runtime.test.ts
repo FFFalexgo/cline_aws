@@ -59,6 +59,74 @@ const createEchoTool = (): AgentTool<{ text: string }, { echoed: string }> => ({
 });
 
 describe("AgentRuntime", () => {
+	it("preserves separate encrypted reasoning blocks through a tool continuation", async () => {
+		const model = new ScriptedModel([
+			() => [
+				{
+					type: "reasoning-delta",
+					blockId: "0",
+					text: "",
+					redacted: true,
+					metadata: { redactedContent: "encrypted-first" },
+				},
+				{
+					type: "reasoning-delta",
+					blockId: "1",
+					text: "",
+					redacted: true,
+					metadata: { redactedContent: "encrypted-second" },
+				},
+				{ type: "reasoning-delta", blockId: "2", text: "Considering" },
+				{ type: "reasoning-delta", blockId: "2", text: " the result." },
+				{
+					type: "reasoning-delta",
+					blockId: "2",
+					text: "",
+					metadata: { signature: "signature" },
+				},
+				{ type: "text-delta", text: "I will echo it." },
+				{
+					type: "tool-call-delta",
+					toolCallId: "echo-1",
+					toolName: "echo",
+					input: { text: "hello" },
+				},
+				{ type: "finish", reason: "tool-calls" },
+			],
+			() => [
+				{ type: "text-delta", text: "Done." },
+				{ type: "finish", reason: "stop" },
+			],
+		]);
+		const runtime = new AgentRuntime({ model, tools: [createEchoTool()] });
+		const result = await runtime.run("Echo hello");
+		expect(result.status).toBe("completed");
+		const assistant = model.requests[1].messages.find(
+			(message) => message.role === "assistant",
+		);
+		expect(assistant?.content.slice(0, 4)).toEqual([
+			{
+				type: "reasoning",
+				text: "",
+				redacted: true,
+				metadata: { redactedContent: "encrypted-first" },
+			},
+			{
+				type: "reasoning",
+				text: "",
+				redacted: true,
+				metadata: { redactedContent: "encrypted-second" },
+			},
+			{
+				type: "reasoning",
+				text: "Considering the result.",
+				redacted: undefined,
+				metadata: { signature: "signature" },
+			},
+			{ type: "text", text: "I will echo it." },
+		]);
+	});
+
 	it("completes a simple turn without tools", async () => {
 		const model = new ScriptedModel([
 			() => [

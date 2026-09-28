@@ -99,6 +99,8 @@ export interface RedactedThinkingContent {
 	type: "redacted_thinking";
 	/** Encrypted/redacted data */
 	data: string;
+	/** Provider metadata required to replay the original encrypted block. */
+	metadata?: unknown;
 	/** Provider-native call ID for this reasoning block (if available) */
 	call_id?: string;
 }

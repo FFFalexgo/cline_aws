@@ -230,6 +230,8 @@ export type AgentModelEvent =
 	| {
 			type: "reasoning-delta";
 			text: string;
+			/** Identifies one reasoning block within the current model response. */
+			blockId?: string;
 			redacted?: boolean;
 			metadata?: unknown;
 	  }
