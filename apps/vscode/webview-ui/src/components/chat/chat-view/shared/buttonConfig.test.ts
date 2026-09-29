@@ -249,13 +249,19 @@ describe("getButtonConfigFromState (dispatch + legacy fallback)", () => {
 		expect(getButtonConfigFromState(messages, undefined, "act")).toEqual(getButtonConfigForMessages(messages, "act"))
 	})
 
-	it("completed phase shows Start New Task regardless of trailing messages", () => {
+	it("completed phase hides footer actions and allows follow-up messages regardless of trailing messages", () => {
 		const messages: BedrockCoderMessage[] = [
 			{ ts: 1, type: "say", say: "completion_result", text: "done" },
 			{ ts: 2, type: "say", say: "api_req_started", text: JSON.stringify({ cost: 0.02 }) },
 		]
 		const turnState: TurnState = { phase: "completed", seq: 3 }
-		expect(getButtonConfigFromState(messages, turnState, "act")).toEqual(BUTTON_CONFIGS.completion_result)
+		const config = getButtonConfigFromState(messages, turnState, "act")
+		expect(config.sendingDisabled).toBe(false)
+		expect(config.enableButtons).toBe(false)
+		expect(config.primaryText).toBeUndefined()
+		expect(config.secondaryText).toBeUndefined()
+		expect(config.primaryAction).toBeUndefined()
+		expect(config.secondaryAction).toBeUndefined()
 	})
 
 	it("streaming phase shows Proceed While Running when a foreground command is running", () => {

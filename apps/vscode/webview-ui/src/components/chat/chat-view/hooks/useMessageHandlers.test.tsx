@@ -47,6 +47,7 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 }))
 
 import type { ChatState } from "../types/chatTypes"
+import { useChatState } from "./useChatState"
 import { useMessageHandlers } from "./useMessageHandlers"
 
 // Minimal ChatState stub. bedrockCoderAsk/lastMessage are the only derived values the send path reads.
@@ -253,6 +254,110 @@ describe("useMessageHandlers — send routing", () => {
 		})
 	})
 
+	it("removes the temporary user message after sending even without an exact backend echo", async () => {
+		mockTurnState = { phase: "completed", seq: 7 }
+		let resolveAskResponse: () => void = () => {}
+		askResponse.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveAskResponse = resolve
+				}),
+		)
+		const { result, rerender } = renderHook(
+			({ messages }) => {
+				const chatState = useChatState(messages)
+				return { chatState, handlers: useMessageHandlers(messages, chatState) }
+			},
+			{ initialProps: { messages: completedConversation } },
+		)
+
+		let sendPromise: Promise<void> = Promise.resolve()
+		act(() => {
+			sendPromise = result.current.handlers.handleSendMessage("another question", [], [])
+		})
+		expect(result.current.chatState.pendingUserMessage?.message.text).toBe("another question")
+
+		await act(async () => {
+			resolveAskResponse()
+			await sendPromise
+		})
+		expect(result.current.chatState.pendingUserMessage).toBeUndefined()
+
+		mockTurnState = { phase: "awaiting_approval", anchorTs: 4, seq: 9 }
+		rerender({
+			messages: [
+				...completedConversation,
+				{ ts: 3, type: "say", say: "user_feedback", text: "another question (processed)" },
+				{ ts: 4, type: "ask", ask: "command", text: "pwd" },
+			],
+		})
+		expect(result.current.chatState.pendingUserMessage).toBeUndefined()
+	})
+
+	it.each(["close", "switch"])("clears the temporary user message when the user chooses to %s the chat", async (action) => {
+		mockTurnState = { phase: "completed", seq: 7 }
+		let resolveAskResponse: () => void = () => {}
+		askResponse.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveAskResponse = resolve
+				}),
+		)
+		const { result, rerender } = renderHook(
+			({ messages }) => {
+				const chatState = useChatState(messages)
+				return { chatState, handlers: useMessageHandlers(messages, chatState) }
+			},
+			{ initialProps: { messages: completedConversation } },
+		)
+
+		let sendPromise: Promise<void> = Promise.resolve()
+		act(() => {
+			sendPromise = result.current.handlers.handleSendMessage("another question", [], [])
+		})
+		expect(result.current.chatState.pendingUserMessage).toBeDefined()
+		rerender({ messages: action === "close" ? [] : [{ ts: 10, type: "say", say: "task", text: "different task" }] })
+		expect(result.current.chatState.pendingUserMessage).toBeUndefined()
+
+		await act(async () => {
+			resolveAskResponse()
+			await sendPromise
+		})
+	})
+
+	it("keeps a newer pending message when an earlier send finishes", async () => {
+		mockTurnState = { phase: "completed", seq: 7 }
+		const resolvers: Array<() => void> = []
+		askResponse.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					resolvers.push(resolve)
+				}),
+		)
+		const { result } = renderHook(() => {
+			const chatState = useChatState(completedConversation)
+			return { chatState, handlers: useMessageHandlers(completedConversation, chatState) }
+		})
+		let firstSend: Promise<void> = Promise.resolve()
+		let secondSend: Promise<void> = Promise.resolve()
+		act(() => {
+			firstSend = result.current.handlers.handleSendMessage("first question", [], [])
+		})
+		act(() => {
+			secondSend = result.current.handlers.handleSendMessage("second question", [], [])
+		})
+		await act(async () => {
+			resolvers[0]()
+			await firstSend
+		})
+		expect(result.current.chatState.pendingUserMessage?.message.text).toBe("second question")
+		await act(async () => {
+			resolvers[1]()
+			await secondSend
+		})
+		expect(result.current.chatState.pendingUserMessage).toBeUndefined()
+	})
+
 	it("restores pending follow-up UI state when askResponse fails", async () => {
 		mockTurnState = { phase: "completed", seq: 7 }
 		const error = new Error("transport down")
@@ -311,7 +416,9 @@ describe("useMessageHandlers — send routing", () => {
 				}),
 			}),
 		)
-		expect(setPendingUserMessage).toHaveBeenLastCalledWith(undefined)
+		const pendingMessage = setPendingUserMessage.mock.calls[0][0]
+		const clearPendingMessage = setPendingUserMessage.mock.lastCall?.[0]
+		expect(clearPendingMessage(pendingMessage)).toBeUndefined()
 	})
 
 	it("does not show a pending chat bubble for a streaming follow-up that will be queued", async () => {

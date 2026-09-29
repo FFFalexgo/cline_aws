@@ -6,7 +6,7 @@ import { useCallback, useRef } from "react"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { SlashServiceClient, TaskServiceClient, UiServiceClient } from "@/services/grpc-client"
 import type { ButtonActionType } from "../shared/buttonConfig"
-import type { ChatState, MessageHandlers } from "../types/chatTypes"
+import type { ChatState, MessageHandlers, PendingUserMessage } from "../types/chatTypes"
 
 /**
  * Custom hook for managing message handlers
@@ -100,9 +100,10 @@ export function useMessageHandlers(messages: BedrockCoderMessage[], chatState: C
 				) => {
 					trackPromptSubmitted(true)
 					clearSentMessageState()
+					let pendingMessage: PendingUserMessage | undefined
 					if (options.showPendingMessage) {
 						const afterTs = Math.max(0, ...messages.map((message) => message.ts))
-						setPendingUserMessage({
+						pendingMessage = {
 							afterTs,
 							message: {
 								ts: Date.now(),
@@ -113,16 +114,20 @@ export function useMessageHandlers(messages: BedrockCoderMessage[], chatState: C
 								files: request.files,
 								partial: false,
 							},
-						})
+						}
+						setPendingUserMessage(pendingMessage)
 					}
 					try {
 						await TaskServiceClient.askResponse(request)
 					} catch (error) {
-						if (options.showPendingMessage) {
-							setPendingUserMessage(undefined)
-						}
 						restorePendingMessageState()
 						throw error
+					} finally {
+						// The temporary bubble only covers the send request. Exact echo matching can
+						// fail after backend processing, leaving a duplicate below every later tool.
+						if (pendingMessage) {
+							setPendingUserMessage((current) => (current === pendingMessage ? undefined : current))
+						}
 					}
 				}
 

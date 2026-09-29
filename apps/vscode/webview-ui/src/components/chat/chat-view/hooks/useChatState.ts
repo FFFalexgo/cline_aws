@@ -49,9 +49,10 @@ export function useChatState(messages: BedrockCoderMessage[]): ChatState {
 		setIsTextAreaFocused(isFocused)
 	}, [])
 
-	// Auto-expand last message row when task or messages first changed.
+	// Clear transient message state when opening or closing a conversation.
 	useEffect(() => {
 		clearExpandedRows()
+		setPendingUserMessage(undefined)
 	}, [task?.ts, clearExpandedRows])
 
 	return {

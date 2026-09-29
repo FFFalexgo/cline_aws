@@ -130,10 +130,10 @@ export const BUTTON_CONFIGS: Record<string, ButtonConfig> = {
 	// Task lifecycle states
 	completion_result: {
 		sendingDisabled: false,
-		enableButtons: true,
-		primaryText: "Start New Task",
+		enableButtons: false,
+		primaryText: undefined,
 		secondaryText: undefined,
-		primaryAction: "new_task",
+		primaryAction: undefined,
 		secondaryAction: undefined,
 	},
 	resume_task: {
@@ -146,10 +146,10 @@ export const BUTTON_CONFIGS: Record<string, ButtonConfig> = {
 	},
 	resume_completed_task: {
 		sendingDisabled: false,
-		enableButtons: true,
-		primaryText: "Start New Task",
+		enableButtons: false,
+		primaryText: undefined,
 		secondaryText: undefined,
-		primaryAction: "new_task",
+		primaryAction: undefined,
 		secondaryAction: undefined,
 	},
 	new_task: {
