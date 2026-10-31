@@ -90,10 +90,10 @@ const user: AgentMessage = {
 describe("Bedrock reasoning wire compatibility", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
-	function model() {
+	function model(modelId = "us.openai.gpt-5.6-sol") {
 		return createBedrockAgentModel({
 			providerId: "bedrock",
-			modelId: "us.openai.gpt-5.6-sol",
+			modelId,
 			connection: {
 				region: "us-east-1",
 				credentialProvider: async () => ({
@@ -104,9 +104,9 @@ describe("Bedrock reasoning wire compatibility", () => {
 		});
 	}
 
-	async function collect(messages: AgentMessage[] = [user]) {
+	async function collect(messages: AgentMessage[] = [user], modelId?: string) {
 		const events: AgentModelEvent[] = [];
-		for await (const event of await model().stream({
+		for await (const event of await model(modelId).stream({
 			messages,
 			tools: [
 				{
@@ -124,12 +124,18 @@ describe("Bedrock reasoning wire compatibility", () => {
 		return events;
 	}
 
-	it("accepts encrypted reasoning and replays it with the tool result", async () => {
+	it.each([
+		"us.openai.gpt-5.6-sol",
+		"us.openai.gpt-6-sol",
+		"global.openai.gpt-6-sol",
+		"us.openai.gpt-6-astra",
+		"global.openai.gpt-6-astra",
+	])("accepts encrypted reasoning and replays it with the tool result for %s", async (modelId) => {
 		const fetchMock = vi.fn(async (_input: unknown, _init?: RequestInit) =>
 			response([{ redactedContent: "ZW5jcnlw" }, { redactedContent: "dGVk" }]),
 		);
 		vi.stubGlobal("fetch", fetchMock);
-		const events = await collect();
+		const events = await collect([user], modelId);
 		expect(events.at(-1)).toMatchObject({
 			type: "finish",
 			reason: "tool-calls",
@@ -179,23 +185,32 @@ describe("Bedrock reasoning wire compatibility", () => {
 				},
 			],
 		};
-		await collect([
-			user,
-			assistant,
-			{
-				id: "tool",
-				role: "tool",
-				createdAt: 3,
-				content: [
-					{
-						type: "tool-result",
-						toolCallId: "call_read",
-						toolName: "read_file",
-						output: "File contents",
-					},
-				],
-			},
-		]);
+		await collect(
+			[
+				user,
+				assistant,
+				{
+					id: "tool",
+					role: "tool",
+					createdAt: 3,
+					content: [
+						{
+							type: "tool-result",
+							toolCallId: "call_read",
+							toolName: "read_file",
+							output: "File contents",
+						},
+					],
+				},
+			],
+			modelId,
+		);
+		const firstInput = fetchMock.mock.calls[0][0];
+		const url = new URL(
+			firstInput instanceof Request ? firstInput.url : String(firstInput),
+		);
+		expect(url.hostname).toBe("bedrock-runtime.us-east-1.amazonaws.com");
+		expect(url.pathname).toBe(`/model/${modelId}/converse-stream`);
 		const request = JSON.parse(fetchMock.mock.calls[1][1]?.body as string);
 		expect(request.messages[1].content).toEqual([
 			{ reasoningContent: { redactedContent: "ZW5jcnlwdGVk" } },

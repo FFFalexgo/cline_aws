@@ -1,6 +1,7 @@
 import type { CoreSessionEvent } from "@bedrock-coder/core"
 import type { BedrockCoderMessage } from "@shared/ExtensionMessage"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { Logger } from "@/shared/services/Logger"
 import { MessageTranslatorState } from "./message-translator"
 import { SdkSessionEventCoordinator, type SdkSessionEventCoordinatorOptions } from "./sdk-session-event-coordinator"
 
@@ -72,6 +73,28 @@ describe("SdkSessionEventCoordinator", () => {
 		expect(options.translateSessionEvent).not.toHaveBeenCalled()
 		expect(options.messages.appendAndEmit).not.toHaveBeenCalled()
 		expect(options.postStateToWebview).not.toHaveBeenCalled()
+		expect(Logger.debug).toHaveBeenCalledWith(
+			"[SdkController] Ignoring SDK event from inactive session old-session; active=session-123; event=agent_event/done",
+		)
+	})
+
+	it("identifies pre-start status and accepts response events once the session is active", async () => {
+		const { coordinator, options, event } = makeCoordinator()
+		options.sessions.getActiveSession.mockReturnValueOnce(undefined)
+
+		await coordinator.handleSessionEvent({
+			type: "status",
+			payload: { sessionId: "session-123", status: "running" },
+		})
+
+		expect(options.translateSessionEvent).not.toHaveBeenCalled()
+		expect(Logger.debug).toHaveBeenCalledWith(
+			"[SdkController] Ignoring SDK event from inactive session session-123; active=none; event=status",
+		)
+
+		await coordinator.handleSessionEvent(event)
+
+		expect(options.translateSessionEvent).toHaveBeenCalledWith(event, options.messageTranslatorState)
 	})
 
 	it("marks turns complete through the session lifecycle", async () => {

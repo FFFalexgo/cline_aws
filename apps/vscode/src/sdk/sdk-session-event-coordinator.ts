@@ -46,8 +46,10 @@ export class SdkSessionEventCoordinator {
 
 		const activeSession = this.options.sessions.getActiveSession()
 		if (!activeSession || event.payload.sessionId !== activeSession.sessionId) {
+			// Core also emits startup status before start() returns and the session becomes active.
+			const eventType = event.type === "agent_event" ? `agent_event/${event.payload.event.type}` : event.type
 			Logger.debug(
-				`[SdkController] Ignoring stale SDK event for session ${event.payload.sessionId}; active=${activeSession?.sessionId ?? "none"}`,
+				`[SdkController] Ignoring SDK event from inactive session ${event.payload.sessionId}; active=${activeSession?.sessionId ?? "none"}; event=${eventType}`,
 			)
 			return
 		}
